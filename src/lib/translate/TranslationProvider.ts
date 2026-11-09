@@ -10,7 +10,7 @@ export class TranslationError extends Error {
   constructor(
     message: string,
     readonly provider: string,
-    readonly cause?: unknown,
+    override readonly cause?: unknown,
   ) {
     super(message);
     this.name = 'TranslationError';
