@@ -42,6 +42,11 @@ function configureEnv(ortWasmPaths: { mjs: string; wasm: string }): void {
   env.useBrowserCache = true;
   // O runtime ONNX precisa ser servido pela própria extensão (CSP não permite CDN).
   env.backends.onnx.wasm!.wasmPaths = ortWasmPaths;
+  // Com useWasmCache o transformers.js baixa o .mjs do runtime e o reimporta como
+  // blob: URL, que a CSP da extensão bloqueia (dentro de um Web Worker não existe
+  // `chrome.runtime`, então ele não detecta que está numa extensão). Sem o cache,
+  // o .mjs e o .wasm são carregados direto das URLs chrome-extension://, que são 'self'.
+  env.useWasmCache = false;
   // SharedArrayBuffer exige cross-origin isolation, que não temos; 1 thread evita surpresas.
   env.backends.onnx.wasm!.numThreads = 1;
 }
