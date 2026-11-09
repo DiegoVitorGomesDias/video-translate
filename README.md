@@ -16,16 +16,26 @@ O que a extensão faz hoje:
 
 Ainda não há seleção do vídeo na página (Fase 2) nem exportação/legenda sobreposta (Fase 3).
 
-### Tradução: LibreTranslate ou Chrome?
+### Tradução: como a extensão escolhe o provedor
 
-- **Sem configurar nada**, a extensão tenta `http://localhost:5000`; se não houver nada lá, cai para a Translator API do Chrome. No Chrome 138+ isso funciona sem Docker; na primeira vez o Chrome baixa o pacote de idioma EN→PT (a janela mostra um botão "Baixar agora" se o navegador exigir um clique para iniciar o download).
-- **Com LibreTranslate** (melhor controle, funciona em Chrome mais antigo e no Edge/Brave sem a Translator API):
+Ordem, a cada abertura da janela (o cabeçalho mostra qual ficou ativo e, no tooltip, por que os anteriores foram pulados):
+
+1. **LibreTranslate**, se houver URL nas opções (padrão `http://localhost:5000`) e a instância responder em `/languages`.
+2. **Translator API do Chrome** (138+, local, sem chave), se o pacote EN→PT já estiver instalado e o tradutor for criado. Tenta os códigos `pt`, `pt-BR` e `pt-PT`. Se o pacote só precisar ser baixado, a janela mostra "Baixar agora".
+3. **Fallback 2**, escolhido nas opções:
+   - **Google Tradutor** (padrão): endpoint público não oficial, sem chave, instantâneo. O texto das frases vai para o Google e não há garantia de disponibilidade.
+   - **Tradução local no navegador**: `Xenova/opus-mt-en-ROMANCE` via transformers.js (~113 MB em q8, baixado uma vez, offline depois). Mais lenta (WASM) e qualidade um pouco menor.
+   - **Nenhum**: só o inglês.
+
+**LibreTranslate local** (melhor controle; nada sai do computador):
 
 ```bash
-docker run -d -p 5000:5000 libretranslate/libretranslate --load-only en,pt
+docker run -d --name libretranslate --restart unless-stopped -p 5000:5000 libretranslate/libretranslate --load-only en,pt
 ```
 
-  Depois, em Opções, confirme a URL `http://localhost:5000`, clique em "Testar conexão" e em "Salvar" (o Chrome pede permissão de acesso a essa origem; a permissão é só para a URL configurada, via `optional_host_permissions`). A instância pública libretranslate.com exige chave paga.
+O primeiro start baixa os modelos de idioma (alguns minutos). Confira com `curl http://localhost:5000/languages`. A extensão já tem permissão fixa para `http://localhost:5000`; para outra URL, em Opções → "Testar conexão" → "Salvar" o Chrome pede permissão só para essa origem (`optional_host_permissions`). A instância pública libretranslate.com exige chave paga.
+
+**Translator API do Chrome indisponível?** Em Opções o campo "Fallback 1" mostra o diagnóstico (API ausente, par EN→PT não suportado, pacote não baixado ou erro ao criar). Confira `chrome://on-device-translation-internals` e `chrome://flags/#translation-api`; a API existe só no Chrome desktop 138+ (Edge/Brave podem não ter).
 
 ## Requisitos
 
@@ -100,7 +110,7 @@ Para checar só o runtime ONNX, o download do modelo e a inferência (sem `tabCa
 node scripts/selftest-chrome.mjs /caminho/para/chrome
 ```
 
-O script também abre `viewer.html` e `options.html` e falha se houver exceção ou `console.error` (falhas de rede, como o LibreTranslate desligado, não contam).
+O script também abre `viewer.html` e `options.html` (falha se houver exceção ou `console.error`; falhas de rede, como o LibreTranslate desligado, não contam), cria a janela do viewer pelo service worker e testa os dois fallbacks de tradução pela página de opções.
 
 Resultado de referência (Chrome for Testing 146 headless, GPU por software): Moonshine tiny carregou em WebGPU em ~17 s na primeira vez (download + aquecimento) e transcreveu 1 s de áudio em ~1,2 s.
 
@@ -108,7 +118,7 @@ Resultado de referência (Chrome for Testing 146 headless, GPU por software): Mo
 
 - WebGPU dentro de um Web Worker de documento offscreen pode não estar disponível em todas as versões do Chrome; nesse caso o worker cai para WASM automaticamente (mais lento).
 - O VAD é por energia, então música de fundo alta pode manter o trecho "aberto" até o limite de 6 s, e trechos só de música podem virar texto sem sentido.
-- A Translator API do Chrome pode exigir um clique para iniciar o download do pacote de idioma; a janela mostra o botão quando isso acontece. Em Edge/Brave a API pode não existir: use o LibreTranslate.
+- A Translator API do Chrome pode falhar com `NotSupportedError` para EN→PT em alguns Chromes (observado num Chrome em Linux); nesse caso a extensão usa o fallback 2. Em Edge/Brave a API pode não existir.
 - Os modelos Moonshine base e Whisper base.en foram configurados mas ainda não medidos nesta máquina; o Whisper processa janelas de 30 s, então a latência é maior.
 - A extensão ainda não tem ícones próprios (Chrome usa o padrão).
 - Em `chrome://` e páginas da Chrome Web Store o `tabCapture` não funciona.
@@ -144,6 +154,8 @@ video-translate/
             ├── TranslationProvider.ts   # interface + cache
             ├── libretranslate.ts
             ├── chrome-translator.ts     # Translator API do Chrome
+            ├── google-free.ts           # endpoint público do Google Tradutor
+            ├── local-opus.ts, local-mt.worker.ts  # tradução local (opus-mt) em Web Worker
             └── index.ts                 # createTranslator(): escolhe e faz fallback
 ```
 

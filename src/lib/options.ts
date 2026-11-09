@@ -8,6 +8,8 @@ export interface Options {
   libreUrl: string;
   libreApiKey: string;
   sttModel: SttModelId;
+  /** Último recurso quando LibreTranslate e Chrome falham. */
+  translationFallback: 'local' | 'google' | 'none';
   /** Tamanho da fonte das legendas, em px. */
   fontSize: number;
 }
@@ -16,6 +18,7 @@ export const DEFAULT_OPTIONS: Options = {
   libreUrl: 'http://localhost:5000',
   libreApiKey: '',
   sttModel: DEFAULT_STT_MODEL,
+  translationFallback: 'google',
   fontSize: 18,
 };
 

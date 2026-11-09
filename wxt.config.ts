@@ -11,6 +11,9 @@ export default defineConfig({
     permissions: ['tabCapture', 'offscreen', 'activeTab', 'scripting', 'storage'],
     // A URL do LibreTranslate é configurável; a permissão de host é pedida só ao salvar.
     optional_host_permissions: ['http://*/*', 'https://*/*'],
+    // Último recurso de tradução (endpoint público do Google Tradutor).
+    // LibreTranslate local padrão e último recurso (Google Tradutor público).
+    host_permissions: ['http://localhost:5000/*', 'https://translate.googleapis.com/*'],
     // Ação sem popup: o clique no ícone dispara browser.action.onClicked no background.
     action: {
       default_title: 'Video Translate: iniciar / parar transcrição',

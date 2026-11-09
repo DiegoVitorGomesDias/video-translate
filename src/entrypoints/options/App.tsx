@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { DEFAULT_OPTIONS, loadOptions, originPattern, saveOptions, type Options } from '@/lib/options';
 import { STT_MODELS } from '@/lib/stt/models';
-import { LibreTranslateProvider, chromeTranslatorAvailability, type ChromeTranslatorAvailability } from '@/lib/translate';
+import { LibreTranslateProvider, chromeTranslatorBestPair, ChromeTranslatorProvider, LOCAL_MT_DOWNLOAD_MB, LocalOpusProvider, GoogleFreeProvider } from '@/lib/translate';
 import type { SttModelId } from '@/lib/messages';
 
 type TestState = { kind: 'idle' } | { kind: 'testing' } | { kind: 'ok'; sample: string } | { kind: 'error'; error: string };
@@ -11,14 +11,15 @@ export function App() {
   const [loaded, setLoaded] = useState(false);
   const [test, setTest] = useState<TestState>({ kind: 'idle' });
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
-  const [chromeAvail, setChromeAvail] = useState<ChromeTranslatorAvailability | null>(null);
+  const [chromeInfo, setChromeInfo] = useState<string | null>(null);
+  const [fallbackTest, setFallbackTest] = useState<string | null>(null);
 
   useEffect(() => {
     void loadOptions().then((o) => {
       setOpts(o);
       setLoaded(true);
     });
-    void chromeTranslatorAvailability('en', 'pt').then(setChromeAvail);
+    void describeChrome().then(setChromeInfo);
   }, []);
 
   const update = <K extends keyof Options>(key: K, value: Options[K]) => {
@@ -73,6 +74,27 @@ export function App() {
     }
   };
 
+  const testFallback = async () => {
+    setFallbackTest('testando…');
+    const t0 = performance.now();
+    try {
+      let sample: string;
+      if (opts.translationFallback === 'local') {
+        const local = new LocalOpusProvider((p) => browser.runtime.getURL(p as never));
+        local.onStatus = (st) => {
+          if (st.state === 'loading') setFallbackTest(`baixando/carregando modelo… ${st.progress !== undefined ? `${st.progress.toFixed(0)}%` : ''}`);
+        };
+        sample = await local.translate('This is amazing!', 'en', 'pt');
+        local.dispose();
+      } else {
+        sample = await new GoogleFreeProvider().translate('This is amazing!', 'en', 'pt');
+      }
+      setFallbackTest(`OK em ${((performance.now() - t0) / 1000).toFixed(1)} s: "This is amazing!" → "${sample}"`);
+    } catch (err) {
+      setFallbackTest(`Falhou: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
   if (!loaded) return null;
 
   return (
@@ -111,14 +133,22 @@ export function App() {
           {test.kind === 'error' && <span className="status error">Falhou: {test.error}</span>}
         </div>
         <p className="hint">
-          Fallback: Translator API do Chrome (138+, roda no computador, sem chave).{' '}
-          {chromeAvail === null
-            ? ''
-            : chromeAvail === 'unavailable'
-              ? 'Indisponível neste navegador.'
-              : chromeAvail === 'available'
-                ? 'Disponível, pacote EN→PT já baixado.'
-                : 'Disponível; o pacote EN→PT será baixado no primeiro uso.'}
+          Fallback 1: Translator API do Chrome (138+, roda no computador, sem chave). {chromeInfo ?? 'verificando…'}
+        </p>
+        <label htmlFor="fallback">Fallback 2 (quando os dois acima falham)</label>
+        <select id="fallback" value={opts.translationFallback} onChange={(e) => update('translationFallback', e.target.value as Options['translationFallback'])}>
+          <option value="google">Google Tradutor (endpoint público não oficial, sem chave; o texto vai para o Google)</option>
+          <option value="local">Tradução local no navegador (opus-mt en→pt, ~{LOCAL_MT_DOWNLOAD_MB} MB, offline, mais lenta)</option>
+          <option value="none">Nenhum (mostrar só o inglês)</option>
+        </select>
+        <div className="row">
+          <button id="test-fallback" onClick={() => void testFallback()} disabled={opts.translationFallback === 'none' || fallbackTest === 'testando…'}>
+            Testar fallback 2
+          </button>
+          {fallbackTest && <span id="fallback-result" className={`status ${fallbackTest.startsWith('OK') ? 'ok' : fallbackTest.startsWith('Falhou') ? 'error' : ''}`}>{fallbackTest}</span>}
+        </div>
+        <p className="hint">
+          Se a Translator API aparecer como indisponível, confira <code>chrome://on-device-translation-internals</code> e a flag <code>chrome://flags/#translation-api</code> (Chrome 138+ desktop).
         </p>
       </section>
 
@@ -154,4 +184,19 @@ export function App() {
       <p className="hint" style={{ marginTop: 24 }}>Video Translate v{browser.runtime.getManifest().version}</p>
     </main>
   );
+}
+
+async function describeChrome(): Promise<string> {
+  const pair = await chromeTranslatorBestPair('en', 'pt');
+  if (!pair) return 'Indisponível neste navegador (API ausente ou par EN→PT não suportado).';
+  if (pair.availability !== 'available') return `Par ${pair.source}→${pair.target}: pacote ainda não baixado (${pair.availability}).`;
+  const chrome = new ChromeTranslatorProvider();
+  try {
+    await chrome.prepare(pair.source, pair.target);
+    const sample = await chrome.translate('This is amazing!', pair.source, pair.target);
+    chrome.dispose();
+    return `OK (${pair.source}→${pair.target}): "This is amazing!" → "${sample}"`;
+  } catch (err) {
+    return `Par ${pair.source}→${pair.target} marcado como disponível, mas a criação falhou: ${err instanceof Error ? err.message : String(err)}`;
+  }
 }

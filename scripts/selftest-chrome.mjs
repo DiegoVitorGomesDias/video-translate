@@ -119,5 +119,37 @@ let windowOk = false;
   }
 }
 
+// Tradução: testa os dois fallbacks pela página de opções (botão "Testar fallback 2").
+let mtOk = true;
+for (const choice of ['google', 'local']) {
+  const r = await fetch(`http://127.0.0.1:${port}/json/new?chrome-extension://${extId}/options.html`, { method: 'PUT' });
+  const t = await r.json();
+  const w = new WebSocket(t.webSocketDebuggerUrl);
+  let n = 0;
+  const evaluate = (expression, awaitPromise = false) => new Promise((resolve) => {
+    const id = ++n;
+    const h = (ev) => { const m = JSON.parse(ev.data); if (m.id === id) { w.removeEventListener('message', h); resolve(m.result?.result?.value); } };
+    w.addEventListener('message', h);
+    w.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, awaitPromise, returnByValue: true } }));
+  });
+  await new Promise((resolve) => { w.onopen = resolve; });
+  await sleep(1500);
+  await evaluate(`chrome.storage.local.get('options').then(d => chrome.storage.local.set({ options: { ...(d.options ?? {}), translationFallback: '${choice}' } }))`, true);
+  await evaluate('location.reload()');
+  await sleep(2000);
+  await evaluate('document.querySelector("#test-fallback").click()');
+  let result = '';
+  const limit = Date.now() + (choice === 'local' ? 240000 : 20000);
+  while (Date.now() < limit) {
+    await sleep(1000);
+    result = (await evaluate('document.querySelector("#fallback-result")?.textContent ?? ""')) ?? '';
+    if (/^(OK|Falhou)/.test(result)) break;
+  }
+  console.log(`[translate:${choice}]`, result || 'TIMEOUT');
+  if (!/^OK/.test(result)) mtOk = false;
+  w.close();
+  await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`).catch(() => {});
+}
+
 proc.kill();
-process.exit(done && uiErrors === 0 && windowOk ? 0 : 2);
+process.exit(done && uiErrors === 0 && windowOk && mtOk ? 0 : 2);

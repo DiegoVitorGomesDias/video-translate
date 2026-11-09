@@ -12,7 +12,7 @@ import {
 } from '@/lib/messages';
 import { SentenceSegmenter, normalize, type Sentence } from '@/lib/segmenter';
 import { watchOptions, type Options } from '@/lib/options';
-import { createTranslator, type TranslatorSelection } from '@/lib/translate';
+import { createTranslator, type LocalOpusStatus, type TranslatorSelection } from '@/lib/translate';
 import { getModelInfo } from '@/lib/stt/models';
 
 interface Card extends Sentence {
@@ -37,6 +37,8 @@ export function App() {
   const [translator, setTranslator] = useState<TranslatorSelection | null>(null);
   const [chromeDownload, setChromeDownload] = useState<number | null>(null);
   const [stuckToEnd, setStuckToEnd] = useState(true);
+  const [translatorRetry, setTranslatorRetry] = useState(0);
+  const [localStatus, setLocalStatus] = useState<LocalOpusStatus | null>(null);
 
   const segmenter = useRef(new SentenceSegmenter({ maxChars: 120, maxWaitMs: 5000 }));
   const listRef = useRef<HTMLDivElement>(null);
@@ -53,12 +55,25 @@ export function App() {
     if (!options) return;
     let cancelled = false;
     setTranslator(null);
-    void createTranslator({ libreUrl: options.libreUrl, libreApiKey: options.libreApiKey, from: FROM, to: TO }).then((sel) => {
+    void createTranslator({
+      libreUrl: options.libreUrl,
+      libreApiKey: options.libreApiKey,
+      fallback: options.translationFallback,
+      resolveUrl: (p) => browser.runtime.getURL(p as never),
+      from: FROM,
+      to: TO,
+    }).then((sel) => {
       if (cancelled) {
         sel.provider?.dispose?.();
         return;
       }
       if (sel.chrome) sel.chrome.onDownloadProgress = (p) => setChromeDownload(p >= 1 ? null : p);
+      if (sel.local) {
+        sel.local.onStatus = setLocalStatus;
+        void sel.local.start().catch(() => undefined);
+      } else {
+        setLocalStatus(null);
+      }
       setTranslator(sel);
       // Traduções já feitas continuam; as que falharam serão tentadas de novo.
       setCards((prev) => prev.map((c) => (c.ptError ? { ...c, ptError: undefined } : c)));
@@ -66,7 +81,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [options?.libreUrl, options?.libreApiKey]);
+  }, [options?.libreUrl, options?.libreApiKey, options?.translationFallback, translatorRetry]);
 
   // ---- Estado da captura (título da aba) ----
   useEffect(() => {
@@ -195,12 +210,13 @@ export function App() {
       .prepare(FROM, TO)
       .then(() => {
         setChromeDownload(null);
-        setTranslator((t) => (t ? { ...t, chromeAvailability: 'available' } : t));
-        setCards((prev) => prev.map((c) => (c.ptError ? { ...c, ptError: undefined } : c)));
+        // Reavalia os provedores: agora o Chrome deve ficar ativo.
+        setTranslatorRetry((n) => n + 1);
       })
       .catch((err: unknown) => {
         setChromeDownload(null);
         console.error('[viewer] download do tradutor do Chrome falhou:', err);
+        setTranslator((t) => (t ? { ...t, chromeAvailability: 'unavailable', chromeError: err instanceof Error ? err.message : String(err) } : t));
       });
   };
 
@@ -208,9 +224,27 @@ export function App() {
   const status = useMemo(() => describeStatus(captureStatus, captureError, stt), [captureStatus, captureError, stt]);
   const translatorLabel = useMemo(() => {
     if (!translator) return 'tradução: verificando…';
-    if (translator.kind === 'libretranslate') return 'tradução: LibreTranslate';
-    if (translator.kind === 'chrome') return `tradução: Chrome${translator.libreError ? ' (LibreTranslate indisponível)' : ''}`;
-    return 'sem tradutor disponível';
+    switch (translator.kind) {
+      case 'libretranslate':
+        return 'tradução: LibreTranslate';
+      case 'chrome':
+        return 'tradução: Chrome (local)';
+      case 'local':
+        return localStatus?.state === 'loading'
+          ? `tradução: baixando modelo local ${localStatus.progress !== undefined ? `${localStatus.progress.toFixed(0)}%` : ''}`
+          : 'tradução: local (opus-mt)';
+      case 'google-free':
+        return 'tradução: Google (não oficial)';
+      default:
+        return 'sem tradutor disponível';
+    }
+  }, [translator, localStatus]);
+  const translatorDetail = useMemo(() => {
+    if (!translator) return '';
+    const parts: string[] = [];
+    if (translator.libreError) parts.push(`LibreTranslate: ${translator.libreError}`);
+    if (translator.chromeError) parts.push(`Chrome: ${translator.chromeError}`);
+    return parts.join('\n');
   }, [translator]);
 
   const pendingLine = [segmenter.current.pending, partial].filter(Boolean).join(' ');
@@ -226,7 +260,7 @@ export function App() {
           <span className="grow" title={status.detail ?? ''}>
             {status.text}
           </span>
-          <button className="link" onClick={openOptions} title={translatorLabel}>
+          <button className="link" onClick={openOptions} title={translatorDetail || translatorLabel}>
             {translatorLabel}
           </button>
           <button className="danger" onClick={stop} disabled={captureStatus === 'stopped'}>
@@ -243,12 +277,17 @@ export function App() {
             <div style={{ width: `${Math.round(chromeDownload * 100)}%` }} />
           </div>
         )}
+        {translator?.kind === 'local' && localStatus?.state === 'loading' && localStatus.progress !== undefined && (
+          <div className="progress">
+            <div style={{ width: `${Math.min(100, localStatus.progress)}%` }} />
+          </div>
+        )}
       </header>
 
       <div className="list" ref={listRef} onScroll={onScroll}>
-        {translator?.kind === 'chrome' && translator.chromeAvailability === 'downloadable' && chromeDownload === null && (
+        {translator && translator.kind !== 'chrome' && translator.kind !== 'libretranslate' && translator.chromeAvailability === 'downloadable' && chromeDownload === null && (
           <p className="notice warn">
-            O Chrome precisa baixar o pacote de tradução inglês → português.{' '}
+            O Chrome pode traduzir localmente depois de baixar o pacote inglês → português.{' '}
             <button className="link" onClick={prepareChrome}>
               Baixar agora
             </button>
@@ -256,14 +295,14 @@ export function App() {
         )}
         {translator?.kind === 'none' && (
           <p className="notice error">
-            Nenhum tradutor disponível: {translator.libreError ? `LibreTranslate: ${translator.libreError}. ` : ''}
-            A Translator API precisa do Chrome 138+.{' '}
+            Nenhum tradutor disponível.
+            {translator.libreError ? ` LibreTranslate: ${translator.libreError}.` : ''}
+            {translator.chromeError ? ` Chrome: ${translator.chromeError}.` : ''}{' '}
             <button className="link" onClick={openOptions}>
-              Abrir opções
+              Configurar LibreTranslate ou outro fallback
             </button>
           </p>
         )}
-        {translator?.kind === 'libretranslate' && options && !options.libreUrl && null}
 
         {cards.length === 0 && !pendingLine && (
           <p className="empty">
