@@ -59,5 +59,40 @@ ws.onmessage = (ev) => {
 const deadline = Date.now() + 8 * 60 * 1000;
 while (!done && Date.now() < deadline) await sleep(500);
 if (!done) console.log('TIMEOUT esperando o autoteste');
-ws.close(); proc.kill();
-process.exit(done ? 0 : 2);
+ws.close();
+
+// Páginas de UI: abre cada uma por alguns segundos e falha se houver exceção ou console.error.
+let uiErrors = 0;
+for (const page of ['viewer.html', 'options.html']) {
+  let pageErrors = 0;
+  const res2 = await fetch(`http://127.0.0.1:${port}/json/new?chrome-extension://${extId}/${page}`, { method: 'PUT' });
+  const t = await res2.json();
+  const ws2 = new WebSocket(t.webSocketDebuggerUrl);
+  let n = 0;
+  await new Promise((resolve) => {
+    ws2.onopen = () => { ws2.send(JSON.stringify({ id: ++n, method: 'Runtime.enable' })); ws2.send(JSON.stringify({ id: ++n, method: 'Log.enable' })); };
+    ws2.onmessage = (ev) => {
+      const m = JSON.parse(ev.data);
+      if (m.method === 'Runtime.exceptionThrown') { pageErrors++; console.log(`[${page} exception]`, m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text); }
+      else if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') { pageErrors++; console.log(`[${page} console.error]`, fmt(m.params.args).slice(0, 400)); }
+      // Falhas de rede (ex.: LibreTranslate não está rodando) são esperadas e não contam.
+      else if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error' && m.params.entry.source !== 'network') { pageErrors++; console.log(`[${page} log:error]`, m.params.entry.text.slice(0, 400)); }
+    };
+    setTimeout(resolve, 4000);
+  });
+  // Confere que o React renderizou algo.
+  ws2.send(JSON.stringify({ id: ++n, method: 'Runtime.evaluate', params: { expression: 'document.querySelector("#root")?.children.length ?? 0', returnByValue: true } }));
+  const rendered = await new Promise((resolve) => {
+    const h = (ev) => { const m = JSON.parse(ev.data); if (m.id === n) { ws2.removeEventListener('message', h); resolve(m.result?.result?.value); } };
+    ws2.addEventListener('message', h);
+    setTimeout(() => resolve(undefined), 3000);
+  });
+  console.log(`[${page}] renderizou: ${rendered ? 'sim' : 'NÃO'}; erros: ${pageErrors}`);
+  if (!rendered) pageErrors++;
+  uiErrors += pageErrors;
+  ws2.close();
+  await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`).catch(() => {});
+}
+
+proc.kill();
+process.exit(done && uiErrors === 0 ? 0 : 2);

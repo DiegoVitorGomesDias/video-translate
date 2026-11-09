@@ -157,11 +157,13 @@ video-translate/
 
 ## 9. Etapas
 
-**Fase 0: prova de conceito (2 a 3 dias)**
+**Fase 0: prova de conceito (2 a 3 dias)** ✅ concluída em 09/11/2026
 Clicar no ícone, capturar o áudio da aba no offscreen, manter o som tocando e ver a transcrição do modelo local no console. Serve para validar os dois pontos mais arriscados: tabCapture + offscreen, e se Moonshine/Whisper roda com latência aceitável na sua máquina (WebGPU vs WASM).
 
-**Fase 1: MVP**
-Janela da extensão com frases em inglês e tradução abaixo (via LibreTranslate, com fallback para o Chrome), texto provisório ao vivo, botões iniciar/parar, barra de download do modelo, tela de opções com a URL do LibreTranslate.
+Resultado medido (Chrome com GPU): Moonshine tiny em WebGPU, modelo pronto em 2,7 s (download em cache depois), inferência de ~0,1 s por segundo de áudio (8 s → 877 ms; 2 s → 180 ms), fila nunca acumulou. Validado no YouTube e no Prime Video (DRM): o áudio chega ao tabCapture e é transcrito; trechos só com música saem vazios. Qualidade do tiny cai com música de fundo e várias vozes.
+
+**Fase 1: MVP** ✅ implementada em 09/11/2026 (falta teste manual)
+Janela da extensão com frases em inglês e tradução abaixo (via LibreTranslate, com fallback para o Chrome), texto provisório ao vivo, botões iniciar/parar, barra de download do modelo, tela de opções com a URL do LibreTranslate. Extras: seletor de modelo (Moonshine tiny/base, Whisper base.en), tamanho da fonte, segmentador de frases com testes.
 
 **Fase 2: seleção do vídeo**
 Overlay para escolher o vídeo, pausa/retomada seguindo o vídeo, título do vídeo na janela, tentativa de `captureStream()` para isolar o áudio.
