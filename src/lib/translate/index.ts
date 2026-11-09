@@ -8,7 +8,7 @@ import { ChromeTranslatorProvider, chromeTranslatorAvailability, type ChromeTran
 export type { TranslationProvider } from './TranslationProvider';
 export { TranslationError } from './TranslationProvider';
 export { LibreTranslateProvider } from './libretranslate';
-export { ChromeTranslatorProvider, chromeTranslatorAvailability, isChromeTranslatorSupported } from './chrome-translator';
+export { ChromeTranslatorProvider, chromeTranslatorAvailability, isChromeTranslatorSupported, type ChromeTranslatorAvailability } from './chrome-translator';
 
 export interface TranslatorSelection {
   /** null quando nenhum provedor está disponível. */
