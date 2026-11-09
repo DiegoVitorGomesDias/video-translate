@@ -164,3 +164,25 @@ browser.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
 });
 
 log('documento offscreen carregado');
+
+// Modo de autoteste: abrir chrome-extension://<id>/offscreen.html?selftest numa aba
+// carrega o modelo sem capturar áudio, para checar o runtime ONNX e o download.
+if (new URLSearchParams(location.search).has('selftest')) {
+  void (async () => {
+    log('SELFTEST: carregando o modelo sem captura');
+    const provider = new LocalTransformersProvider({ resolveUrl: (p) => browser.runtime.getURL(p as never) });
+    provider.onStatus = (s) => log(`SELFTEST modelo [${s.state}]: ${s.message ?? ''}${s.progress !== undefined ? ` ${s.progress.toFixed(0)}%` : ''}`);
+    provider.onResult = (r) => log(`SELFTEST resultado: "${r.text}" (inferência ${r.inferenceMs.toFixed(0)} ms)`);
+    try {
+      const t0 = performance.now();
+      await provider.start();
+      log(`SELFTEST OK: provedor pronto em ${(performance.now() - t0).toFixed(0)} ms`);
+      // 1 s de tom de 440 Hz só para exercitar a inferência (deve dar texto vazio ou lixo).
+      const audio = new Float32Array(TARGET_SAMPLE_RATE);
+      for (let i = 0; i < audio.length; i++) audio[i] = 0.3 * Math.sin((2 * Math.PI * 440 * i) / TARGET_SAMPLE_RATE);
+      provider.transcribe({ audio, sampleRate: TARGET_SAMPLE_RATE, durationMs: 1000, endedAt: performance.now(), reason: 'flush' });
+    } catch (err) {
+      console.error('[offscreen] SELFTEST FALHOU:', err);
+    }
+  })();
+}

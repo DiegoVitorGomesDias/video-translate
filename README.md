@@ -67,6 +67,19 @@ pnpm build
 - Se o som da aba continua tocando sem cortes depois de iniciar a captura.
 - Se a fila (`fila=N` nas mensagens `trecho fechado`) cresce sem parar, o modelo não acompanha o áudio em tempo real nesse backend.
 
+### Autoteste do modelo sem capturar áudio
+
+Para checar só o runtime ONNX, o download do modelo e a inferência (sem `tabCapture`):
+
+- No Chrome, com a extensão carregada, abra `chrome-extension://<id-da-extensão>/offscreen.html?selftest` numa aba e veja o console. O id aparece no card em `chrome://extensions`.
+- Sem interação, com um Chrome/Chromium instalado:
+
+```bash
+node scripts/selftest-chrome.mjs /caminho/para/chrome
+```
+
+Resultado de referência (Chrome for Testing 146 headless, GPU por software): Moonshine tiny carregou em WebGPU em ~17 s na primeira vez (download + aquecimento) e transcreveu 1 s de áudio em ~1,2 s.
+
 ### Problemas conhecidos / dúvidas a confirmar no teste
 
 - WebGPU dentro de um Web Worker de um documento offscreen pode não estar disponível em todas as versões do Chrome; nesse caso o worker cai para WASM automaticamente.
