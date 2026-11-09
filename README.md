@@ -58,7 +58,9 @@ pnpm build
 
 1. Rode `pnpm build`.
 2. Abra `chrome://extensions`, ligue o **Modo do desenvolvedor** (canto superior direito).
-3. Clique em **Carregar sem compactação** e escolha a pasta `.output/chrome-mv3`. (Depois de um novo `pnpm build`, clique no ícone de recarregar no card da extensão.)
+3. Clique em **Carregar sem compactação** e escolha a pasta `.output/chrome-mv3`.
+
+   **Para atualizar**: rode `pnpm build` de novo e clique no ícone de recarregar no card da extensão (ou no botão "Atualizar" no topo da página). Confira a **versão** no card: ela sobe a cada mudança (`package.json` → manifest) e aparece também no cabeçalho da janela, no rodapé das opções e no console do service worker (`[background] video-translate vX.Y.Z`). Se a versão não mudou, o Chrome ainda está com a build antiga.
 4. Abra uma aba com um vídeo em inglês tocando (YouTube, Prime Video, etc.) e clique no ícone da extensão (fixe-o pelo menu de extensões, se não aparecer). Abre a janela do viewer; o som do vídeo continua normal.
 5. Na janela: o cabeçalho mostra o carregamento do modelo (barra de progresso na primeira vez), depois "Ouvindo · moonshine-tiny (GPU)". As frases em inglês aparecem em cards com a tradução embaixo; a última linha em cinza é o texto provisório.
 6. Para parar: botão **Parar** ou fechar a janela.

@@ -94,5 +94,30 @@ for (const page of ['viewer.html', 'options.html']) {
   await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`).catch(() => {});
 }
 
+// Abre a janela do viewer a partir do service worker (mesma chamada que o clique no
+// ícone faz) e confere que um novo target viewer.html aparece.
+let windowOk = false;
+{
+  const list = await targets();
+  const sw = list.find((t) => t.type === 'service_worker' && t.url.startsWith(`chrome-extension://${extId}/`));
+  if (!sw) console.log('[window] service worker não encontrado (pode estar dormindo)');
+  else {
+    const ws3 = new WebSocket(sw.webSocketDebuggerUrl);
+    await new Promise((resolve) => {
+      ws3.onopen = () => ws3.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: {
+        expression: "chrome.windows.create({ url: chrome.runtime.getURL('/viewer.html?selftest-window'), type: 'popup', width: 480, height: 720 }).then(w => 'ok:' + w.id)",
+        awaitPromise: true, returnByValue: true } }));
+      ws3.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id === 1) { console.log('[window] windows.create →', JSON.stringify(m.result?.result?.value ?? m.result?.exceptionDetails?.text ?? m.error)); resolve(); } };
+      setTimeout(resolve, 5000);
+    });
+    ws3.close();
+    for (let i = 0; i < 20 && !windowOk; i++) {
+      await sleep(250);
+      windowOk = (await targets()).some((t) => t.url.includes('viewer.html?selftest-window'));
+    }
+    console.log(`[window] target viewer.html apareceu: ${windowOk ? 'sim' : 'NÃO'}`);
+  }
+}
+
 proc.kill();
-process.exit(done && uiErrors === 0 ? 0 : 2);
+process.exit(done && uiErrors === 0 && windowOk ? 0 : 2);

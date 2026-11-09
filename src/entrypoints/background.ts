@@ -76,13 +76,22 @@ async function sendToOffscreen(msg: OffscreenMessage, attempts = 5, delayMs = 20
 }
 
 async function openViewer(): Promise<number | null> {
-  const win = await browser.windows.create({
-    url: browser.runtime.getURL(VIEWER_URL),
-    type: 'popup',
-    width: 480,
-    height: 720,
-  });
-  return win?.id ?? null;
+  const url = browser.runtime.getURL(VIEWER_URL);
+  try {
+    const win = await browser.windows.create({ url, type: 'popup', width: 480, height: 720 });
+    console.log(`[background] janela do viewer aberta (id ${win?.id})`);
+    return win?.id ?? null;
+  } catch (err) {
+    console.error('[background] windows.create falhou, abrindo o viewer numa aba:', err);
+    try {
+      const tab = await browser.tabs.create({ url });
+      return tab.windowId ?? null;
+    } catch (err2) {
+      console.error('[background] tabs.create também falhou:', err2);
+      await browser.action.setTitle({ title: `Video Translate: não consegui abrir a janela (${String(err2)})` });
+      return null;
+    }
+  }
 }
 
 async function focusViewer(state: CaptureState): Promise<void> {
@@ -100,16 +109,26 @@ async function focusViewer(state: CaptureState): Promise<void> {
 
 async function startCapture(tab: chrome.tabs.Tab): Promise<void> {
   if (tab.id === undefined) return;
-  // Precisa acontecer logo após o gesto do usuário (clique no ícone).
+  // 1. O streamId precisa ser pedido logo após o gesto do usuário (clique no ícone).
   const streamId = await browser.tabCapture.getMediaStreamId({ targetTabId: tab.id });
-  const options = await loadOptions();
-  await ensureOffscreenDocument();
-  await sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'start-capture', streamId, tabId: tab.id, sttModel: options.sttModel });
-  // Salva o estado antes de abrir a janela, para o viewer já achar o título.
+
+  // 2. Abre a janela já, antes de qualquer espera longa; erros aparecem dentro dela.
   await setState({ tabId: tab.id, tabTitle: tab.title ?? '', windowId: null });
   const windowId = await openViewer();
   await setState({ tabId: tab.id, tabTitle: tab.title ?? '', windowId });
-  console.log(`[background] captura iniciada na aba ${tab.id} (${tab.title ?? ''})`);
+
+  // 3. Offscreen + captura (o modelo carrega lá dentro, em paralelo com a UI).
+  try {
+    const options = await loadOptions();
+    await ensureOffscreenDocument();
+    await sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'start-capture', streamId, tabId: tab.id, sttModel: options.sttModel });
+    console.log(`[background] captura iniciada na aba ${tab.id} (${tab.title ?? ''})`);
+  } catch (err) {
+    console.error('[background] falha ao iniciar a captura:', err);
+    // Mantém a janela aberta mostrando o erro; o estado continua "capturando" para o
+    // usuário poder parar pelo botão / fechando a janela.
+    browser.runtime.sendMessage({ type: 'capture-status', status: 'error', error: String(err) }).catch(() => undefined);
+  }
 }
 
 async function stopCapture(): Promise<void> {
@@ -130,7 +149,7 @@ async function stopCapture(): Promise<void> {
 }
 
 export default defineBackground(() => {
-  console.log(`[background] Video Translate v${browser.runtime.getManifest().version}`);
+  console.log(`[background] video-translate v${browser.runtime.getManifest().version}`);
   browser.action.onClicked.addListener(async (tab) => {
     try {
       const state = await getState();
@@ -140,7 +159,8 @@ export default defineBackground(() => {
         await startCapture(tab);
       }
     } catch (err) {
-      console.error('[background] erro:', err);
+      console.error('[background] erro no clique:', err);
+      await browser.action.setTitle({ title: `Video Translate: erro (${String(err)})` });
       await stopCapture();
     }
   });
