@@ -21,7 +21,7 @@ declare class AudioWorkletProcessor implements AudioWorkletProcessorLike {
   process(inputs: Float32Array[][], outputs: Float32Array[][], parameters: Record<string, Float32Array>): boolean;
 }
 
-export const PCM_WORKLET_NAME = 'pcm-downsampler';
+import { PCM_WORKLET_NAME } from './constants';
 
 interface PcmWorkletOptions {
   targetSampleRate?: number;

@@ -3,12 +3,10 @@
 // segmenta por silêncio e manda cada trecho para o provedor de transcrição.
 
 import { isOffscreenMessage, type BackgroundMessage, type OffscreenMessage } from '@/lib/messages';
-import { PCM_WORKLET_NAME } from '@/lib/audio/pcm-worklet';
+import { PCM_WORKLET_NAME, TARGET_SAMPLE_RATE } from '@/lib/audio/constants';
 import { EnergyVad } from '@/lib/audio/vad';
 import { LocalTransformersProvider } from '@/lib/stt/local-transformers';
 import type { SpeechProvider } from '@/lib/stt/SpeechProvider';
-
-const TARGET_SAMPLE_RATE = 16000;
 
 interface CaptureSession {
   stream: MediaStream;
