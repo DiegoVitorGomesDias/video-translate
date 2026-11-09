@@ -9,7 +9,8 @@
     "build": "wxt build",
     "zip": "wxt zip",
     "compile": "tsc --noEmit",
-    "postinstall": "wxt prepare"
+    "postinstall": "wxt prepare",
+    "test": "node --experimental-strip-types --no-warnings --test 'tests/**/*.test.ts'"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.2",

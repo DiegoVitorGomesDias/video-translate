@@ -3,5 +3,10 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "strict": true
-  }
+  },
+  "exclude": [
+    "tests",
+    "node_modules",
+    ".output"
+  ]
 }
