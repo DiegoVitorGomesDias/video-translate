@@ -1,0 +1,11 @@
+node_modules
+.output
+.wxt
+stats.html
+stats-*.json
+.env
+.env.*
+!.env.example
+*.log
+# Binários do onnxruntime-web copiados por scripts/copy-ort.mjs
+public/onnx/

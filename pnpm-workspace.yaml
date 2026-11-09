@@ -1,0 +1,7 @@
+packages:
+  - .
+# onnxruntime-node e protobufjs só importam no Node; na extensão usamos o onnxruntime-web,
+# então não precisamos rodar os scripts de build deles.
+allowBuilds:
+  onnxruntime-node: false
+  protobufjs: false
