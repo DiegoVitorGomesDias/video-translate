@@ -77,7 +77,7 @@ export function App() {
 
   return (
     <main className="page">
-      <h1>Video Translate</h1>
+      <h1>Video Translate <small style={{ fontWeight: 400, color: 'var(--muted)', fontSize: 13 }}>v{browser.runtime.getManifest().version}</small></h1>
       <p className="sub">Configurações da transcrição e da tradução. Mudanças no modelo valem na próxima captura.</p>
 
       <section>

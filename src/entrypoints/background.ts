@@ -130,6 +130,7 @@ async function stopCapture(): Promise<void> {
 }
 
 export default defineBackground(() => {
+  console.log(`[background] Video Translate v${browser.runtime.getManifest().version}`);
   browser.action.onClicked.addListener(async (tab) => {
     try {
       const state = await getState();

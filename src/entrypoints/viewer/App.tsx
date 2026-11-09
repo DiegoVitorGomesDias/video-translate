@@ -22,6 +22,7 @@ interface Card extends Sentence {
 
 type CaptureStatus = 'starting' | 'listening' | 'stopped' | 'error';
 
+const VERSION = browser.runtime.getManifest().version;
 const FROM = 'en';
 const TO = 'pt';
 
@@ -217,7 +218,9 @@ export function App() {
   return (
     <div className="app">
       <header className="header">
-        <h1 title={capture.tabTitle ?? ''}>{capture.tabTitle || 'Video Translate'}</h1>
+        <h1 title={`${capture.tabTitle ?? ''} · Video Translate v${VERSION}`}>
+          {capture.tabTitle || 'Video Translate'} <span className="version">v{VERSION}</span>
+        </h1>
         <div className="row">
           <span className={`dot ${status.kind}`} />
           <span className="grow" title={status.detail ?? ''}>
