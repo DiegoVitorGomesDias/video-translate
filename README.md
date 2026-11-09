@@ -67,6 +67,15 @@ pnpm build
 - Se o som da aba continua tocando sem cortes depois de iniciar a captura.
 - Se a fila (`fila=N` nas mensagens `trecho fechado`) cresce sem parar, o modelo não acompanha o áudio em tempo real nesse backend.
 
+### Resultado da Fase 0 (09/11/2026, Chrome com GPU, vídeo do YouTube)
+
+- Moonshine tiny carregou em **WebGPU**: download ~2 s (já em cache depois), aquecimento ~0,8 s, provedor pronto em ~2,7 s.
+- Inferência de ~100 ms por segundo de áudio (1,9 s de fala → 181 ms; 8 s → 877 ms). Fila sempre em 1, ou seja, o modelo acompanha o áudio em tempo real.
+- Transcrição legível em fala limpa (3Blue1Brown): pontuação ok, erros pontuais em palavras raras ("tailored" em vez de "Taylor").
+- O som da aba continuou tocando normalmente.
+
+Conclusão: os dois riscos da Fase 0 (tabCapture + offscreen, e latência do modelo local) estão resolvidos; dá para seguir para a Fase 1.
+
 ### Autoteste do modelo sem capturar áudio
 
 Para checar só o runtime ONNX, o download do modelo e a inferência (sem `tabCapture`):
