@@ -3,6 +3,8 @@
 // atinge `maxSegmentMs`. Guarda um pré-rolo para não cortar o começo das palavras.
 
 export interface AudioSegment {
+  /** Id sequencial do trecho (compartilhado entre parciais e o final). */
+  id: number;
   /** PCM mono Float32 na taxa `sampleRate`. */
   audio: Float32Array;
   sampleRate: number;
@@ -46,8 +48,12 @@ export class EnergyVad {
   private speechSamples = 0;
   private trailingSilence = 0;
   private inSpeech = false;
+  private nextId = 1;
+  private currentId = 0;
 
   onSegment: ((segment: AudioSegment) => void) | null = null;
+  /** Chamado quando um novo trecho começa (fala detectada). */
+  onSpeechStart: ((segmentId: number) => void) | null = null;
   /** Chamado em cada bloco com o RMS e se foi considerado fala (útil para debug). */
   onLevel: ((rms: number, isSpeech: boolean, threshold: number) => void) | null = null;
 
@@ -55,11 +61,32 @@ export class EnergyVad {
     this.sampleRate = opts.sampleRate ?? 16000;
     const ms = (v: number) => Math.round((v / 1000) * this.sampleRate);
     this.silenceSamples = ms(opts.silenceMs ?? 400);
-    this.maxSamples = ms(opts.maxSegmentMs ?? 8000);
+    this.maxSamples = ms(opts.maxSegmentMs ?? 6000);
     this.minSpeechSamples = ms(opts.minSpeechMs ?? 250);
     this.preRollSamples = ms(opts.preRollMs ?? 300);
     this.minThreshold = opts.minThreshold ?? 0.008;
     this.noiseFactor = opts.noiseFactor ?? 3;
+  }
+
+  /** Há um trecho aberto (fala em andamento)? */
+  get isSpeaking(): boolean {
+    return this.inSpeech;
+  }
+
+  /** Id do trecho aberto (0 se nenhum). */
+  get currentSegmentId(): number {
+    return this.inSpeech ? this.currentId : 0;
+  }
+
+  /** Duração (ms) do trecho aberto. */
+  get currentDurationMs(): number {
+    return (this.segmentLength / this.sampleRate) * 1000;
+  }
+
+  /** Cópia do áudio do trecho aberto até agora (para transcrição parcial). */
+  peek(): Float32Array | null {
+    if (!this.inSpeech || this.segmentLength === 0) return null;
+    return concat(this.segment, this.segmentLength);
   }
 
   push(block: Float32Array): void {
@@ -86,6 +113,7 @@ export class EnergyVad {
     if (!this.inSpeech) {
       if (isSpeech) {
         this.inSpeech = true;
+        this.currentId = this.nextId++;
         this.segment = [...this.preRoll];
         this.segmentLength = this.preRollLength;
         this.speechSamples = 0;
@@ -93,6 +121,7 @@ export class EnergyVad {
         this.clearPreRoll();
         this.append(block);
         this.speechSamples += block.length;
+        this.onSpeechStart?.(this.currentId);
       } else {
         this.pushPreRoll(block);
       }
@@ -122,11 +151,13 @@ export class EnergyVad {
   private close(reason: AudioSegment['reason']): void {
     const audio = concat(this.segment, this.segmentLength);
     const hadEnoughSpeech = this.speechSamples >= this.minSpeechSamples;
+    const id = this.currentId;
     this.inSpeech = false;
     this.segment = [];
     this.segmentLength = 0;
     if (hadEnoughSpeech && this.onSegment) {
       this.onSegment({
+        id,
         audio,
         sampleRate: this.sampleRate,
         durationMs: (audio.length / this.sampleRate) * 1000,

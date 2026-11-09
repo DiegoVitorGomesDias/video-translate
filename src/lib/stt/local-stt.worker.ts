@@ -1,14 +1,20 @@
 // Web Worker que roda o modelo de transcrição local com @huggingface/transformers.
 // Recebe trechos de áudio Float32 a 16 kHz e devolve o texto.
+//
+// Fila com prioridade: finais são atendidos antes de parciais; de parciais só o mais
+// recente de cada trecho é mantido, e parciais de trechos já fechados são descartados.
 
 import { pipeline, env, type AutomaticSpeechRecognitionPipeline } from '@huggingface/transformers';
 
-export type SttDevice = 'webgpu' | 'wasm';
+import type { SttModelCandidate } from './models';
 
-export interface SttModelCandidate {
-  modelId: string;
-  device: SttDevice;
-  dtype?: string | Record<string, string>;
+export interface TranscribeRequest {
+  type: 'transcribe';
+  id: number;
+  segmentId: number;
+  isFinal: boolean;
+  audio: Float32Array;
+  sampleRate: number;
 }
 
 export type WorkerInMessage =
@@ -19,12 +25,13 @@ export type WorkerInMessage =
       /** URLs absolutas dos arquivos do runtime ONNX dentro da extensão. */
       ortWasmPaths: { mjs: string; wasm: string };
     }
-  | { type: 'transcribe'; id: number; audio: Float32Array; sampleRate: number }
+  | TranscribeRequest
   | { type: 'dispose' };
 
 export type WorkerOutMessage =
   | { type: 'status'; state: 'loading' | 'ready' | 'error'; message?: string; progress?: number; device?: string; model?: string }
-  | { type: 'result'; id: number; text: string; inferenceMs: number }
+  | { type: 'result'; id: number; segmentId: number; isFinal: boolean; text: string; inferenceMs: number }
+  | { type: 'dropped'; id: number }
   | { type: 'error'; id?: number; message: string };
 
 const post = (msg: WorkerOutMessage) => self.postMessage(msg);
@@ -32,8 +39,13 @@ const post = (msg: WorkerOutMessage) => self.postMessage(msg);
 let transcriber: AutomaticSpeechRecognitionPipeline | null = null;
 let activeModel: string | null = null;
 let activeDevice: string | null = null;
-// Fila: o runtime não suporta inferências simultâneas, então serializamos.
-let chain: Promise<void> = Promise.resolve();
+let initPromise: Promise<void> | null = null;
+
+const finals: TranscribeRequest[] = [];
+/** Um parcial pendente por trecho (o mais recente substitui o anterior). */
+const partials = new Map<number, TranscribeRequest>();
+const closedSegments = new Set<number>();
+let busy = false;
 
 function configureEnv(ortWasmPaths: { mjs: string; wasm: string }): void {
   // Modelos vêm do Hugging Face Hub e ficam no Cache API do navegador.
@@ -97,22 +109,65 @@ async function init(candidates: SttModelCandidate[], ortWasmPaths: { mjs: string
   post({ type: 'status', state: 'error', message: `Nenhum modelo carregou:\n${errors.join('\n')}` });
 }
 
-async function transcribe(id: number, audio: Float32Array, sampleRate: number): Promise<void> {
+function enqueue(req: TranscribeRequest): void {
+  if (req.isFinal) {
+    closedSegments.add(req.segmentId);
+    const stale = partials.get(req.segmentId);
+    if (stale) {
+      partials.delete(req.segmentId);
+      post({ type: 'dropped', id: stale.id });
+    }
+    finals.push(req);
+  } else {
+    if (closedSegments.has(req.segmentId)) {
+      post({ type: 'dropped', id: req.id });
+      return;
+    }
+    const prev = partials.get(req.segmentId);
+    if (prev) post({ type: 'dropped', id: prev.id });
+    partials.set(req.segmentId, req);
+  }
+  void pump();
+}
+
+function next(): TranscribeRequest | undefined {
+  if (finals.length > 0) return finals.shift();
+  // Parcial mais recente (maior id) entre os trechos abertos.
+  let best: TranscribeRequest | undefined;
+  for (const p of partials.values()) if (!best || p.id > best.id) best = p;
+  if (best) partials.delete(best.segmentId);
+  return best;
+}
+
+async function pump(): Promise<void> {
+  if (busy) return;
+  busy = true;
+  try {
+    await initPromise;
+    for (let req = next(); req; req = next()) {
+      await transcribe(req);
+    }
+  } finally {
+    busy = false;
+  }
+}
+
+async function transcribe(req: TranscribeRequest): Promise<void> {
   if (!transcriber) {
-    post({ type: 'error', id, message: 'Modelo ainda não carregado' });
+    post({ type: 'error', id: req.id, message: 'Modelo ainda não carregado' });
     return;
   }
-  if (sampleRate !== 16000) {
-    post({ type: 'error', id, message: `Esperado 16 kHz, recebido ${sampleRate}` });
+  if (req.sampleRate !== 16000) {
+    post({ type: 'error', id: req.id, message: `Esperado 16 kHz, recebido ${req.sampleRate}` });
     return;
   }
   const started = performance.now();
   try {
-    const output = await transcriber(audio);
+    const output = await transcriber(req.audio);
     const text = (Array.isArray(output) ? output.map((o) => o.text).join(' ') : output.text).trim();
-    post({ type: 'result', id, text, inferenceMs: performance.now() - started });
+    post({ type: 'result', id: req.id, segmentId: req.segmentId, isFinal: req.isFinal, text, inferenceMs: performance.now() - started });
   } catch (err) {
-    post({ type: 'error', id, message: err instanceof Error ? err.message : String(err) });
+    post({ type: 'error', id: req.id, message: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -120,18 +175,19 @@ self.onmessage = (event: MessageEvent<WorkerInMessage>) => {
   const msg = event.data;
   switch (msg.type) {
     case 'init':
-      chain = chain.then(() => init(msg.candidates, msg.ortWasmPaths));
+      initPromise = init(msg.candidates, msg.ortWasmPaths);
       break;
     case 'transcribe':
-      chain = chain.then(() => transcribe(msg.id, msg.audio, msg.sampleRate));
+      enqueue(msg);
       break;
     case 'dispose':
-      chain = chain.then(async () => {
+      void (async () => {
+        await initPromise;
         await transcriber?.dispose();
         transcriber = null;
         console.log(`[stt-worker] modelo ${activeModel} (${activeDevice}) liberado`);
         self.close();
-      });
+      })();
       break;
   }
 };

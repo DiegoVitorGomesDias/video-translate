@@ -2,18 +2,8 @@
 
 import type { AudioSegment } from '@/lib/audio/vad';
 import type { SpeechProvider, SpeechProviderStatus, TranscriptResult } from './SpeechProvider';
-import type { SttModelCandidate, WorkerInMessage, WorkerOutMessage } from './local-stt.worker';
-
-export const MOONSHINE_TINY = 'onnx-community/moonshine-tiny-ONNX';
-export const WHISPER_TINY_EN = 'onnx-community/whisper-tiny.en';
-
-/** Ordem de tentativa: Moonshine (WebGPU → WASM), depois Whisper tiny.en (WebGPU → WASM). */
-export const DEFAULT_CANDIDATES: SttModelCandidate[] = [
-  { modelId: MOONSHINE_TINY, device: 'webgpu', dtype: 'fp32' },
-  { modelId: MOONSHINE_TINY, device: 'wasm', dtype: 'q8' },
-  { modelId: WHISPER_TINY_EN, device: 'webgpu', dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' } },
-  { modelId: WHISPER_TINY_EN, device: 'wasm', dtype: 'q8' },
-];
+import type { WorkerInMessage, WorkerOutMessage } from './local-stt.worker';
+import { candidatesFor, type SttModelCandidate } from './models';
 
 export interface LocalTransformersOptions {
   candidates?: SttModelCandidate[];
@@ -22,8 +12,10 @@ export interface LocalTransformersOptions {
 }
 
 interface Pending {
-  segment: AudioSegment;
-  sentAt: number;
+  segmentId: number;
+  isFinal: boolean;
+  audioEndedAt: number;
+  audioMs: number;
 }
 
 export class LocalTransformersProvider implements SpeechProvider {
@@ -39,7 +31,7 @@ export class LocalTransformersProvider implements SpeechProvider {
   private readonly resolveUrl: (path: string) => string;
 
   constructor(opts: LocalTransformersOptions) {
-    this.candidates = opts.candidates ?? DEFAULT_CANDIDATES;
+    this.candidates = opts.candidates ?? candidatesFor('moonshine-tiny');
     this.resolveUrl = opts.resolveUrl;
   }
 
@@ -61,17 +53,20 @@ export class LocalTransformersProvider implements SpeechProvider {
             const p = this.pending.get(msg.id);
             this.pending.delete(msg.id);
             if (!p) return;
-            const now = performance.now();
             this.onResult?.({
+              segmentId: p.segmentId,
               text: msg.text,
-              isFinal: true,
-              latencyMs: now - p.segment.endedAt,
+              isFinal: p.isFinal,
+              latencyMs: performance.now() - p.audioEndedAt,
               inferenceMs: msg.inferenceMs,
-              audioMs: p.segment.durationMs,
-              segmentEndedAt: p.segment.endedAt,
+              audioMs: p.audioMs,
+              audioEndedAt: p.audioEndedAt,
             });
             break;
           }
+          case 'dropped':
+            this.pending.delete(msg.id);
+            break;
           case 'error':
             if (msg.id !== undefined) this.pending.delete(msg.id);
             console.error('[stt] erro no worker:', msg.message);
@@ -98,11 +93,19 @@ export class LocalTransformersProvider implements SpeechProvider {
   }
 
   transcribe(segment: AudioSegment): void {
+    this.send(segment.id, true, segment.audio, segment.sampleRate, segment.endedAt);
+  }
+
+  transcribePartial(segmentId: number, audio: Float32Array, sampleRate: number): void {
+    this.send(segmentId, false, audio, sampleRate, performance.now());
+  }
+
+  private send(segmentId: number, isFinal: boolean, audio: Float32Array, sampleRate: number, audioEndedAt: number): void {
     if (!this.worker) throw new Error('Provider não iniciado');
     const id = this.nextId++;
-    this.pending.set(id, { segment, sentAt: performance.now() });
-    // Transfere o buffer (zero-copy); o segmento não é mais usado aqui.
-    this.post({ type: 'transcribe', id, audio: segment.audio, sampleRate: segment.sampleRate }, [segment.audio.buffer]);
+    this.pending.set(id, { segmentId, isFinal, audioEndedAt, audioMs: (audio.length / sampleRate) * 1000 });
+    // Transfere o buffer (zero-copy); o chamador não usa mais esse array.
+    this.post({ type: 'transcribe', id, segmentId, isFinal, audio, sampleRate }, [audio.buffer]);
   }
 
   async stop(): Promise<void> {

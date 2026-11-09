@@ -1,17 +1,19 @@
 import type { AudioSegment } from '@/lib/audio/vad';
 
 export interface TranscriptResult {
+  /** Id do trecho de áudio a que o texto se refere. */
+  segmentId: number;
   text: string;
-  /** Resultado fechado (não muda mais) ou provisório. Na fase 0 só há finais. */
+  /** Resultado fechado (não muda mais) ou provisório (texto parcial de um trecho aberto). */
   isFinal: boolean;
-  /** Latência total (ms) entre o fechamento do trecho de áudio e a chegada do texto. */
+  /** Latência total (ms) entre o fim do áudio enviado e a chegada do texto. */
   latencyMs: number;
   /** Tempo (ms) só da inferência do modelo. */
   inferenceMs: number;
   /** Duração do áudio transcrito (ms). */
   audioMs: number;
-  /** performance.now() do fechamento do trecho de áudio. */
-  segmentEndedAt: number;
+  /** performance.now() do fim do áudio enviado. */
+  audioEndedAt: number;
 }
 
 export interface SpeechProviderStatus {
@@ -31,8 +33,13 @@ export interface SpeechProvider {
   readonly name: string;
   /** Carrega modelo / abre conexão. Resolve quando pronto para transcrever. */
   start(): Promise<void>;
-  /** Envia um trecho de áudio (16 kHz mono) para transcrição. */
+  /** Envia um trecho fechado (16 kHz mono) para transcrição final. */
   transcribe(segment: AudioSegment): void;
+  /**
+   * Envia o áudio acumulado de um trecho ainda aberto para um texto provisório.
+   * Parciais têm prioridade menor que finais e podem ser descartados.
+   */
+  transcribePartial(segmentId: number, audio: Float32Array, sampleRate: number): void;
   /** Encerra e libera recursos. */
   stop(): Promise<void>;
 
