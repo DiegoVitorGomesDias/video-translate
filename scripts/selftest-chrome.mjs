@@ -6,6 +6,7 @@
 //
 // Uso: node scripts/selftest-chrome.mjs [caminho-do-chrome]
 //      (ou defina CHROME_BIN). Precisa de `pnpm build` antes.
+import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
