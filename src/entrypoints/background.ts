@@ -49,8 +49,23 @@ async function ensureOffscreenDocument(): Promise<void> {
   await creatingOffscreen;
 }
 
-async function sendToOffscreen(msg: OffscreenMessage): Promise<unknown> {
-  return browser.runtime.sendMessage(msg);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Envia para o offscreen. Logo após createDocument o módulo da página pode ainda
+ * não ter registrado o listener, então repete algumas vezes enquanto o Chrome
+ * responder "Receiving end does not exist".
+ */
+async function sendToOffscreen(msg: OffscreenMessage, attempts = 5, delayMs = 200): Promise<unknown> {
+  for (let i = 1; ; i++) {
+    try {
+      return await browser.runtime.sendMessage(msg);
+    } catch (err) {
+      const text = err instanceof Error ? err.message : String(err);
+      if (i >= attempts || !text.includes('Receiving end does not exist')) throw err;
+      await sleep(delayMs);
+    }
+  }
 }
 
 async function startCapture(tab: chrome.tabs.Tab): Promise<void> {
