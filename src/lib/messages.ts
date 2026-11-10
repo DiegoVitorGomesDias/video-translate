@@ -7,7 +7,10 @@ export const DRAWER_TARGET = 'drawer' as const;
 
 export type DisplayMode = 'drawer' | 'window';
 
-export type SttModelId = 'moonshine-tiny' | 'moonshine-base' | 'whisper-base.en';
+export type SttModelId = 'auto' | 'moonshine-tiny' | 'moonshine-base' | 'whisper-base.en' | 'whisper-large-v3-turbo';
+/** Motor de transcrição: modelo local (transformers.js) ou reconhecimento nativo do Chrome no dispositivo. */
+export type SttEngineId = 'local' | 'chrome';
+export type VadEngineId = 'silero' | 'energy';
 export type VadProfileId = 'fast' | 'normal' | 'long';
 export type SegmentEndReason = 'silence' | 'max-length' | 'flush';
 
@@ -19,7 +22,17 @@ export interface StartCaptureMessage {
   streamId: string;
   tabId: number;
   sttModel: SttModelId;
+  sttEngine: SttEngineId;
   vadProfile: VadProfileId;
+  /** Título da aba no início (vira glossário para o reconhecimento do Chrome). */
+  tabTitle?: string;
+}
+
+/** O título da aba mudou; o offscreen refaz o glossário do reconhecimento do Chrome. */
+export interface SetTabTitleMessage {
+  target: typeof OFFSCREEN_TARGET;
+  type: 'set-tab-title';
+  title: string;
 }
 
 export interface StopCaptureMessage {
@@ -33,7 +46,7 @@ export interface GetTranscriptsMessage {
   type: 'get-transcripts';
 }
 
-export type OffscreenMessage = StartCaptureMessage | StopCaptureMessage | GetTranscriptsMessage;
+export type OffscreenMessage = StartCaptureMessage | StopCaptureMessage | GetTranscriptsMessage | SetTabTitleMessage;
 
 export interface GetTranscriptsResponse {
   finals: TranscriptEvent[];
@@ -92,6 +105,11 @@ export type DrawerMessage = DrawerCloseMessage | DrawerPingMessage;
 export interface AppliedConfig {
   sttModel: SttModelId;
   vadProfile: VadProfileId;
+  /** Motor pedido nas opções e o que de fato está em uso (o Chrome pode cair para o local). */
+  sttEngine?: SttEngineId;
+  activeEngine?: SttEngineId;
+  /** Detector de fala em uso (o Silero pode cair para o de energia). */
+  vadEngine?: VadEngineId;
 }
 
 export interface CaptureStatusEvent {

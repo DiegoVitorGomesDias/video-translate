@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { DEFAULT_OPTIONS, loadOptions, originPattern, saveOptions, type Options } from '@/lib/options';
 import { STT_MODELS } from '@/lib/stt/models';
+import { chromeSpeechAvailability, chromeSpeechInstall, type ChromeSpeechAvailability } from '@/lib/stt/chrome-speech';
 import { VAD_PROFILES, type VadProfile } from '@/lib/audio/vad';
 import { LibreTranslateProvider, chromeTranslatorBestPair, ChromeTranslatorProvider, LOCAL_MT_DOWNLOAD_MB, LocalOpusProvider, GoogleFreeProvider } from '@/lib/translate';
 import type { SttModelId } from '@/lib/messages';
@@ -25,6 +26,8 @@ export function App() {
   const [fallbackTest, setFallbackTest] = useState<string | null>(null);
   const [qr, setQr] = useState<{ url: string; dataUrl: string; withSettings: boolean } | null>(null);
   const [includeKey, setIncludeKey] = useState(false);
+  const [speech, setSpeech] = useState<ChromeSpeechAvailability | 'checking' | 'installing'>('checking');
+  const [speechMsg, setSpeechMsg] = useState<string | null>(null);
 
   useEffect(() => {
     void loadOptions().then((o) => {
@@ -32,7 +35,22 @@ export function App() {
       setLoaded(true);
     });
     void describeChrome().then(setChromeInfo);
+    void chromeSpeechAvailability().then(setSpeech);
   }, []);
+
+  const installSpeech = async () => {
+    setSpeech('installing');
+    setSpeechMsg('Baixando o pacote de voz em inglês (~60 MB)...');
+    try {
+      const ok = await chromeSpeechInstall();
+      const after = await chromeSpeechAvailability();
+      setSpeech(after);
+      setSpeechMsg(ok && after === 'available' ? 'Pacote instalado.' : `O Chrome respondeu "${after}". Se continuar assim, este Chrome/sistema não oferece o reconhecimento no dispositivo.`);
+    } catch (err) {
+      setSpeech(await chromeSpeechAvailability());
+      setSpeechMsg(`Falhou: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
 
   const update = <K extends keyof Options>(key: K, value: Options[K]) => {
     setOpts((o) => ({ ...o, [key]: value }));
@@ -209,7 +227,40 @@ export function App() {
       </section>
 
       <section>
-        <h2>Modelo de transcrição</h2>
+        <h2>Motor de transcrição</h2>
+        <label className={`model ${opts.sttEngine === 'local' ? 'selected' : ''}`}>
+          <input type="radio" name="sttEngine" value="local" checked={opts.sttEngine === 'local'} onChange={() => update('sttEngine', 'local')} />
+          <span className="name">Modelo local na extensão (padrão)</span>
+          <div className="desc">Roda o modelo escolhido abaixo com transformers.js (WebGPU ou CPU). Funciona em qualquer Chromium.</div>
+        </label>
+        <label className={`model ${opts.sttEngine === 'chrome' ? 'selected' : ''}`}>
+          <input type="radio" name="sttEngine" value="chrome" checked={opts.sttEngine === 'chrome'} onChange={() => update('sttEngine', 'chrome')} />
+          <span className="name">Reconhecimento do Chrome no dispositivo</span>
+          <div className="desc">
+            Mesmo motor do Live Caption, sem download na extensão (o Chrome baixa um pacote de ~60 MB uma vez). Texto contínuo com pontuação e usa os nomes do título e do
+            glossário para acertar o reconhecimento. Só no Chrome da Google (139+); se não estiver disponível, a captura cai para o modelo local.
+            {' '}
+            {speech === 'checking' && 'Verificando...'}
+            {speech === 'available' && <strong>Disponível neste Chrome.</strong>}
+            {speech === 'downloading' && 'Pacote de voz sendo baixado...'}
+            {speech === 'installing' && 'Instalando...'}
+            {speech === 'downloadable' && (
+              <>
+                Pacote de voz ainda não instalado.{' '}
+                <button type="button" onClick={() => void installSpeech()}>
+                  Instalar pacote de voz (en-US)
+                </button>
+              </>
+            )}
+            {speech === 'unavailable' && <strong>Indisponível neste Chrome/sistema</strong>}
+            {speech === 'unsupported' && <strong>Este navegador não tem a API (Chrome 139+).</strong>}
+            {speechMsg && <div>{speechMsg}</div>}
+          </div>
+        </label>
+      </section>
+
+      <section>
+        <h2>Modelo de transcrição local</h2>
         {STT_MODELS.map((m) => (
           <label key={m.id} className={`model ${opts.sttModel === m.id ? 'selected' : ''}`}>
             <input type="radio" name="sttModel" value={m.id} checked={opts.sttModel === m.id} onChange={() => update('sttModel', m.id as SttModelId)} />

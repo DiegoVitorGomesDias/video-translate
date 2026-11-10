@@ -16,7 +16,7 @@ import { saveOptions, watchOptions, type Options } from '@/lib/options';
 import { createTranslator, type LocalOpusStatus, type TranslatorSelection } from '@/lib/translate';
 import { ContextualTranslationProvider } from '@/lib/translate/contextual';
 import { correctTranscript, extractTermsFromTitle, mergeTerms, parseGlossary, termPattern } from '@/lib/context';
-import { getModelInfo } from '@/lib/stt/models';
+import { modelLabelFor } from '@/lib/stt/models';
 import { VAD_PROFILES } from '@/lib/audio/vad';
 
 interface Card extends Sentence {
@@ -299,12 +299,20 @@ export function App() {
   const configLine = useMemo(() => {
     const cfg = applied ?? (options ? { sttModel: options.sttModel, vadProfile: options.sentenceSplit } : null);
     if (!cfg) return null;
-    const model = getModelInfo(cfg.sttModel);
-    const backend = stt?.state === 'ready' ? (stt.device === 'webgpu' ? 'GPU' : 'WASM') : stt?.state === 'loading' ? 'carregando' : null;
+    const chrome = cfg.activeEngine === 'chrome' || (cfg.activeEngine === undefined && cfg.sttEngine === 'chrome');
+    const backend = stt?.state === 'ready' ? (stt.device === 'webgpu' ? 'GPU' : stt.device === 'chrome' ? 'nativo' : 'WASM') : stt?.state === 'loading' ? 'carregando' : null;
     const vp = VAD_PROFILES[cfg.vadProfile] ?? VAD_PROFILES.normal;
-    const modelLabel = model.label.replace(/\s*\(.*\)$/, '');
-    const changed = !!applied && !!options && (options.sttModel !== applied.sttModel || options.sentenceSplit !== applied.vadProfile);
-    return { model: `${modelLabel}${backend ? ` · ${backend}` : ''}`, split: `Separação: ${vp.label} (${vp.silenceMs / 1000} s / ${vp.maxSegmentMs / 1000} s)`, changed, isApplied: !!applied };
+    const modelLabel = chrome ? 'Chrome no dispositivo' : modelLabelFor(stt?.state === 'ready' ? stt.model : undefined, cfg.sttModel);
+    const fellBack = cfg.sttEngine === 'chrome' && cfg.activeEngine === 'local';
+    const vadLabel = chrome ? '' : cfg.vadEngine === 'silero' ? ' · Silero' : cfg.vadEngine === 'energy' ? ' · energia' : '';
+    const changed =
+      !!applied && !!options && (options.sttModel !== applied.sttModel || options.sentenceSplit !== applied.vadProfile || options.sttEngine !== (applied.sttEngine ?? 'local'));
+    return {
+      model: `${modelLabel}${backend ? ` · ${backend}` : ''}${fellBack ? ' (Chrome indisponível)' : ''}`,
+      split: `Separação: ${vp.label} (${vp.silenceMs / 1000} s / ${vp.maxSegmentMs / 1000} s)${vadLabel}`,
+      changed,
+      isApplied: !!applied,
+    };
   }, [applied, options, stt]);
 
   const pendingLine = [segmenter.current.pending, partial].filter(Boolean).join(' ');
@@ -464,6 +472,7 @@ function describeStatus(
     return { kind: 'loading', text: `Carregando modelo${model ? ` ${model}` : ''}${pct}`, detail: stt?.message };
   }
   if (stt.state === 'error') return { kind: 'error', text: 'Modelo não carregou', detail: stt.message };
+  if (stt.device === 'chrome') return { kind: 'listening', text: 'Ouvindo · Chrome no dispositivo', detail: stt.message };
   const device = stt.device === 'webgpu' ? 'GPU' : 'CPU';
   return { kind: 'listening', text: `Ouvindo · ${modelShortName(stt.model ?? '')} (${device})`, detail: stt.message };
 }
@@ -473,5 +482,3 @@ function modelShortName(hfId: string): string {
   return base.replace(/-ONNX$/i, '').replace(/^onnx-/, '');
 }
 
-// Mantém a referência usada no cabeçalho para o label do modelo escolhido nas opções.
-void getModelInfo;

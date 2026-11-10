@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SentenceSegmenter, normalize, type Sentence } from '@/lib/segmenter';
-import { getModelInfo } from '@/lib/stt/models';
+import { modelLabelFor } from '@/lib/stt/models';
+import type { VadEngine } from '@/lib/audio/silero-vad';
 import { VAD_PROFILES, type VadProfile } from '@/lib/audio/vad';
 import type { SttModelId } from '@/lib/messages';
 import { createTranslator, type LocalOpusStatus, type TranslatorSelection } from '@/lib/translate';
@@ -37,6 +38,7 @@ export function App() {
   const [mic, setMic] = useState<MicDevice | null>(null);
   const [mics, setMics] = useState<MicDevice[]>([]);
   const [applied, setApplied] = useState<{ sttModel: SttModelId; vadProfile: VadProfile } | null>(null);
+  const [vadEngine, setVadEngine] = useState<VadEngine | null>(null);
 
   const capture = useRef(new MicCapture());
   const segmenter = useRef(new SentenceSegmenter({ maxChars: 90, maxWaitMs: 5000 }));
@@ -45,6 +47,7 @@ export function App() {
   /** Termos do glossário (mantidos na tradução, corrigidos na transcrição). */
   const terms = useMemo(() => mergeTerms(parseGlossary(settings.glossary)), [settings.glossary]);
   const termsRef = useRef<string[]>([]);
+  const vadEngineRef = useRef<VadEngine | null>(null);
   termsRef.current = terms;
 
   useEffect(() => {
@@ -123,7 +126,11 @@ export function App() {
         {
           onStatus: setStt,
           onResult,
-          onLevel: (rms) => setLevel(Math.min(1, rms * 8)),
+          onLevel: (level) => setLevel(Math.min(1, vadEngineRef.current === 'silero' ? level : level * 8)),
+          onVadEngine: (e) => {
+            vadEngineRef.current = e;
+            setVadEngine(e);
+          },
           onError: (m) => setError(m),
           onDevice: (d) => {
             setMic(d);
@@ -205,12 +212,13 @@ export function App() {
 
   const configLine = useMemo(() => {
     const cfg = applied ?? { sttModel: settings.sttModel, vadProfile: settings.sentenceSplit };
-    const model = getModelInfo(cfg.sttModel);
+    const modelLabel = modelLabelFor(running && stt?.state === 'ready' ? stt.model : undefined, cfg.sttModel);
     const backend = running && stt?.state === 'ready' ? (stt.device === 'webgpu' ? 'GPU' : 'WASM') : null;
     const vp = VAD_PROFILES[cfg.vadProfile] ?? VAD_PROFILES.normal;
+    const vadLabel = running && vadEngine ? (vadEngine === 'silero' ? ' · Silero' : ' · energia') : '';
     const changed = !!applied && running && (settings.sttModel !== applied.sttModel || settings.sentenceSplit !== applied.vadProfile);
-    return { model: `${model.label.replace(/\s*\(.*\)$/, '')}${backend ? ` · ${backend}` : ''}`, split: `Separação: ${vp.label} (${vp.silenceMs / 1000} s / ${vp.maxSegmentMs / 1000} s)`, changed };
-  }, [applied, settings, stt, running]);
+    return { model: `${modelLabel}${backend ? ` · ${backend}` : ''}`, split: `Separação: ${vp.label} (${vp.silenceMs / 1000} s / ${vp.maxSegmentMs / 1000} s)${vadLabel}`, changed };
+  }, [applied, settings, stt, running, vadEngine]);
 
   const pendingLine = [segmenter.current.pending, partial].filter(Boolean).join(' ');
 

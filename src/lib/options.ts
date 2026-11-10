@@ -1,6 +1,6 @@
 // Configurações do usuário, guardadas em chrome.storage.local.
 
-import type { DisplayMode, SttModelId, VadProfileId } from './messages';
+import type { DisplayMode, SttEngineId, SttModelId, VadProfileId } from './messages';
 import { DEFAULT_STT_MODEL } from './stt/models';
 
 export interface Options {
@@ -8,6 +8,8 @@ export interface Options {
   libreUrl: string;
   libreApiKey: string;
   sttModel: SttModelId;
+  /** Modelo local (transformers.js) ou reconhecimento nativo do Chrome no dispositivo. */
+  sttEngine: SttEngineId;
   /** Separação de frases: pausa e duração máxima do trecho (ver VAD_PROFILES). */
   sentenceSplit: VadProfileId;
   /** Último recurso quando LibreTranslate e Chrome falham. */
@@ -26,6 +28,7 @@ export const DEFAULT_OPTIONS: Options = {
   libreUrl: 'http://localhost:5000',
   libreApiKey: '',
   sttModel: DEFAULT_STT_MODEL,
+  sttEngine: 'local',
   sentenceSplit: 'normal',
   translationFallback: 'local',
   fontSize: 18,

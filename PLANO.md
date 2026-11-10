@@ -96,6 +96,22 @@ Como funciona o modo local:
 - **Cache:** o modelo é baixado uma vez e fica no cache do navegador (Cache API). A primeira execução mostra uma barra de download na janela.
 - **Permissão extra:** o manifest precisa liberar `wasm-unsafe-eval` na CSP da extensão para o runtime ONNX funcionar.
 
+**Atualização (10/11/2026, v0.6.0): qualidade da transcrição.** Pesquisa de alternativas gratuitas e leves (ver tabela abaixo) e três mudanças:
+
+1. **Silero VAD** (`onnx-community/silero-vad`, ~2 MB, WASM num Web Worker próprio) no lugar do detector por energia: classifica janelas de 32 ms por probabilidade de fala, então música de fundo e ruído não abrem trechos e pausas curtas são reconhecidas melhor. O mesmo `SegmentBuilder` (pré-rolo, corte no ponto mais silencioso, perfis de separação) é compartilhado; se o modelo não carregar, cai para o detector por energia sem parar a captura. O cabeçalho mostra "Silero" ou "energia".
+2. **Modelo "Automático"** (padrão): Moonshine base em WebGPU quando há GPU; sem GPU, Moonshine tiny em WASM para manter a latência. **Whisper large-v3-turbo** (q4f16, ~570 MB, só WebGPU) entrou como opção de máxima qualidade; é multilíngue, então a geração fixa `language: 'en'`.
+3. **Motor "Reconhecimento do Chrome no dispositivo"** (opção): Web Speech API com `processLocally` (Chrome 139+), recebendo a track do `tabCapture` direto (`start(track)`, Chrome 133+) e os nomes do título/glossário como `phrases` (Chrome 140+). É o motor do Live Caption, não pesa na extensão (pacote de ~60 MB baixado pelo Chrome na tela de opções) e faz streaming com pontuação. Limitação: só o Chrome da Google recebe o pacote; no Chrome Linux do usuário `SpeechRecognition.available()` respondeu `unavailable`, então a captura cai automaticamente para o modelo local (o cabeçalho avisa "Chrome indisponível"). A frase de abertura desta seção ("a Web Speech API só escuta o microfone") deixou de valer no Chrome 133+.
+
+| Opção | Download | WER médio | Streaming | Glossário |
+|---|---|---|---|---|
+| Moonshine tiny | 28 a 110 MB | ~12% | por trechos do VAD | não |
+| Moonshine base | 63 a 155 MB | ~8% | por trechos | não |
+| Chrome no dispositivo (SODA) | ~60 MB fora da extensão | nível Live Caption | nativo | `phrases` |
+| distil-small.en / whisper-small.en | 540 a 590 MB | melhor com ruído | janela de 30 s | prompt |
+| whisper-large-v3-turbo q4f16 | ~570 MB | o melhor | janela de 30 s, pesado | prompt |
+| Parakeet TDT 0.6B (parakeet.js) | >600 MB | melhor que small | sim | não |
+| Moonshine v2 Streaming (fev/2026) | tiny 34M params | ~12% / ~7,8% (small) | nativo | não; sem ONNX para transformers.js ainda |
+
 ## 5. Tradução EN → PT
 
 | Opção | Prós | Contras |

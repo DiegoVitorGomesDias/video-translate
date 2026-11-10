@@ -1,6 +1,14 @@
-// Detector simples de fala por energia (RMS), com piso de ruído adaptativo.
-// Fecha um trecho quando há `silenceMs` de silêncio após fala, ou quando o trecho
-// atinge `maxSegmentMs`. Guarda um pré-rolo para não cortar o começo das palavras.
+// Segmentação de fala em trechos para o STT.
+//
+// `SegmentBuilder` recebe blocos de áudio já classificados (fala / não fala, com uma
+// pontuação de "quão fala" é cada bloco) e fecha um trecho quando há `silenceMs` de
+// silêncio após fala, ou quando o trecho atinge `maxSegmentMs` (cortando no ponto
+// mais silencioso). Guarda um pré-rolo para não cortar o começo das palavras.
+//
+// `EnergyVad` é o classificador simples por energia (RMS) com piso de ruído adaptativo.
+// O Silero VAD (silero-vad.ts) usa o mesmo `SegmentBuilder` com a probabilidade do modelo.
+//
+// Sem dependências do navegador, para poder ser testado em Node.
 
 export interface AudioSegment {
   /** Id sequencial do trecho (compartilhado entre parciais e o final). */
@@ -23,7 +31,28 @@ export const VAD_PROFILES: Record<VadProfile, { silenceMs: number; maxSegmentMs:
   long: { silenceMs: 400, maxSegmentMs: 6000, label: 'Longa', description: 'Pausas de 0,4 s e até 6 s. Frases mais completas, mas falas diferentes podem ficar juntas.' },
 };
 
-export interface VadOptions {
+export interface VadOptions extends SegmentBuilderOptions {
+  /** Limiar absoluto mínimo de RMS para considerar fala. */
+  minThreshold?: number;
+  /** Fator sobre o piso de ruído para considerar fala. */
+  noiseFactor?: number;
+}
+
+/** Interface comum dos detectores de fala (por energia e Silero). */
+export interface SpeechSegmenter {
+  readonly isSpeaking: boolean;
+  readonly currentSegmentId: number;
+  readonly currentDurationMs: number;
+  /** Cópia do áudio do trecho aberto até agora (para transcrição parcial). */
+  peek(): Promise<Float32Array | null> | Float32Array | null;
+  push(block: Float32Array): void;
+  flush(): void;
+  onSegment: ((segment: AudioSegment) => void) | null;
+  onSpeechStart: ((segmentId: number) => void) | null;
+  onLevel: ((level: number, isSpeech: boolean, threshold: number) => void) | null;
+}
+
+export interface SegmentBuilderOptions {
   sampleRate?: number;
   /** Silêncio contínuo (ms) após fala para fechar o trecho. */
   silenceMs?: number;
@@ -33,22 +62,16 @@ export interface VadOptions {
   minSpeechMs?: number;
   /** Áudio anterior ao início da fala incluído no trecho (ms). */
   preRollMs?: number;
-  /** Limiar absoluto mínimo de RMS para considerar fala. */
-  minThreshold?: number;
-  /** Fator sobre o piso de ruído para considerar fala. */
-  noiseFactor?: number;
 }
 
-export class EnergyVad {
-  private readonly sampleRate: number;
+/** Junta blocos classificados em trechos (ver cabeçalho do arquivo). */
+export class SegmentBuilder {
+  protected readonly sampleRate: number;
   private readonly silenceSamples: number;
   private readonly maxSamples: number;
   private readonly minSpeechSamples: number;
   private readonly preRollSamples: number;
-  private readonly minThreshold: number;
-  private readonly noiseFactor: number;
 
-  private noiseFloor = 0.002;
   private preRoll: Float32Array[] = [];
   private preRollLength = 0;
   private segment: Float32Array[] = [];
@@ -64,18 +87,16 @@ export class EnergyVad {
   onSegment: ((segment: AudioSegment) => void) | null = null;
   /** Chamado quando um novo trecho começa (fala detectada). */
   onSpeechStart: ((segmentId: number) => void) | null = null;
-  /** Chamado em cada bloco com o RMS e se foi considerado fala (útil para debug). */
-  onLevel: ((rms: number, isSpeech: boolean, threshold: number) => void) | null = null;
+  /** Chamado em cada bloco com o nível (RMS ou probabilidade) e se foi considerado fala. */
+  onLevel: ((level: number, isSpeech: boolean, threshold: number) => void) | null = null;
 
-  constructor(opts: VadOptions = {}) {
+  constructor(opts: SegmentBuilderOptions = {}) {
     this.sampleRate = opts.sampleRate ?? 16000;
     const ms = (v: number) => Math.round((v / 1000) * this.sampleRate);
     this.silenceSamples = ms(opts.silenceMs ?? 250);
     this.maxSamples = ms(opts.maxSegmentMs ?? 4000);
     this.minSpeechSamples = ms(opts.minSpeechMs ?? 250);
     this.preRollSamples = ms(opts.preRollMs ?? 300);
-    this.minThreshold = opts.minThreshold ?? 0.008;
-    this.noiseFactor = opts.noiseFactor ?? 3;
   }
 
   /** Há um trecho aberto (fala em andamento)? */
@@ -99,26 +120,14 @@ export class EnergyVad {
     return concat(this.segment, this.segmentLength);
   }
 
-  push(block: Float32Array): void {
-    let sum = 0;
-    for (let i = 0; i < block.length; i++) {
-      const v = block[i] ?? 0;
-      sum += v * v;
-    }
-    const rms = Math.sqrt(sum / Math.max(1, block.length));
-
-    const threshold = Math.max(this.minThreshold, this.noiseFloor * this.noiseFactor);
-    const isSpeech = rms >= threshold;
-
-    // Piso de ruído: só acompanha blocos sem fala (desce rápido, sobe devagar);
-    // durante a fala fica praticamente parado, para não "engolir" falas longas.
-    if (!isSpeech) {
-      const alpha = rms < this.noiseFloor ? 0.2 : 0.02;
-      this.noiseFloor = this.noiseFloor * (1 - alpha) + rms * alpha;
-    } else {
-      this.noiseFloor = this.noiseFloor * 0.9995 + rms * 0.0005;
-    }
-    this.onLevel?.(rms, isSpeech, threshold);
+  /**
+   * Recebe um bloco já classificado. `level` é a pontuação do bloco (RMS ou
+   * probabilidade de fala): quanto menor, mais silencioso, usada para escolher o ponto
+   * de corte quando o trecho atinge a duração máxima.
+   */
+  feed(block: Float32Array, level: number, isSpeech: boolean, threshold = 0): void {
+    this.onLevel?.(level, isSpeech, threshold);
+    const rms = level;
 
     if (!this.inSpeech) {
       if (isSpeech) {
@@ -245,6 +254,41 @@ export class EnergyVad {
   private clearPreRoll(): void {
     this.preRoll = [];
     this.preRollLength = 0;
+  }
+}
+
+/** Detector por energia (RMS) com piso de ruído adaptativo. */
+export class EnergyVad extends SegmentBuilder implements SpeechSegmenter {
+  private readonly minThreshold: number;
+  private readonly noiseFactor: number;
+  private noiseFloor = 0.002;
+
+  constructor(opts: VadOptions = {}) {
+    super(opts);
+    this.minThreshold = opts.minThreshold ?? 0.008;
+    this.noiseFactor = opts.noiseFactor ?? 3;
+  }
+
+  push(block: Float32Array): void {
+    let sum = 0;
+    for (let i = 0; i < block.length; i++) {
+      const v = block[i] ?? 0;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / Math.max(1, block.length));
+
+    const threshold = Math.max(this.minThreshold, this.noiseFloor * this.noiseFactor);
+    const isSpeech = rms >= threshold;
+
+    // Piso de ruído: só acompanha blocos sem fala (desce rápido, sobe devagar);
+    // durante a fala fica praticamente parado, para não "engolir" falas longas.
+    if (!isSpeech) {
+      const alpha = rms < this.noiseFloor ? 0.2 : 0.02;
+      this.noiseFloor = this.noiseFloor * (1 - alpha) + rms * alpha;
+    } else {
+      this.noiseFloor = this.noiseFloor * 0.9995 + rms * 0.0005;
+    }
+    this.feed(block, rms, isSpeech, threshold);
   }
 }
 

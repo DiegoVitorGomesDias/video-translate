@@ -3,7 +3,8 @@
 
 import workletUrl from '@/lib/audio/pcm-worklet.ts?worker&url';
 import { PCM_WORKLET_NAME, TARGET_SAMPLE_RATE } from '@/lib/audio/constants';
-import { EnergyVad, VAD_PROFILES, type VadProfile } from '@/lib/audio/vad';
+import { SileroVad, type VadEngine } from '@/lib/audio/silero-vad';
+import { VAD_PROFILES, type VadProfile } from '@/lib/audio/vad';
 import { LocalTransformersProvider } from '@/lib/stt/local-transformers';
 import { candidatesFor } from '@/lib/stt/models';
 import type { SpeechProvider, SpeechProviderStatus, TranscriptResult } from '@/lib/stt/SpeechProvider';
@@ -15,7 +16,10 @@ const PARTIAL_MIN_MS = 1000;
 export interface MicCaptureHandlers {
   onStatus: (s: SpeechProviderStatus) => void;
   onResult: (r: TranscriptResult) => void;
-  onLevel?: (rms: number, isSpeech: boolean) => void;
+  /** Nível do bloco: RMS (detector por energia) ou probabilidade de fala 0..1 (Silero). */
+  onLevel?: (level: number, isSpeech: boolean) => void;
+  /** Detector de fala em uso: Silero ou, se o modelo não carregar, energia. */
+  onVadEngine?: (engine: VadEngine) => void;
   onError: (message: string) => void;
   /** Microfone em uso mudou (início ou troca automática ao conectar/desconectar fone). */
   onDevice?: (device: MicDevice | null) => void;
@@ -68,7 +72,7 @@ export class MicCapture {
   private preferredId = '';
   private current: MicDevice | null = null;
   private onDeviceChange: (() => void) | null = null;
-  private vad: EnergyVad | null = null;
+  private vad: SileroVad | null = null;
   private provider: SpeechProvider | null = null;
   private partialTimer = 0;
   private wakeLock: { release(): Promise<void> } | null = null;
@@ -103,13 +107,14 @@ export class MicCapture {
     this.worklet = worklet;
 
     const vp = VAD_PROFILES[profile] ?? VAD_PROFILES.normal;
-    const vad = new EnergyVad({ sampleRate: TARGET_SAMPLE_RATE, silenceMs: vp.silenceMs, maxSegmentMs: vp.maxSegmentMs });
+    const vad = new SileroVad({ sampleRate: TARGET_SAMPLE_RATE, silenceMs: vp.silenceMs, maxSegmentMs: vp.maxSegmentMs, resolveUrl: resolveAsset });
     this.vad = vad;
+    vad.onEngine = (engine) => h.onVadEngine?.(engine);
     const provider = new LocalTransformersProvider({ candidates: candidatesFor(model), resolveUrl: resolveAsset });
     this.provider = provider;
     provider.onStatus = h.onStatus;
     provider.onResult = h.onResult;
-    vad.onLevel = (rms, isSpeech) => h.onLevel?.(rms, isSpeech);
+    vad.onLevel = (level, isSpeech) => h.onLevel?.(level, isSpeech);
 
     let ready = false;
     vad.onSegment = (seg) => {
@@ -119,13 +124,18 @@ export class MicCapture {
     vad.onSpeechStart = () => {
       lastPartialAt = performance.now();
     };
+    let peeking = false;
     this.partialTimer = window.setInterval(() => {
-      if (!ready || !vad.isSpeaking || vad.currentDurationMs < PARTIAL_MIN_MS) return;
+      if (!ready || peeking || !vad.isSpeaking || vad.currentDurationMs < PARTIAL_MIN_MS) return;
       if (performance.now() - lastPartialAt < PARTIAL_INTERVAL_MS - 50) return;
-      const audio = vad.peek();
-      if (!audio) return;
-      lastPartialAt = performance.now();
-      provider.transcribePartial(vad.currentSegmentId, audio, TARGET_SAMPLE_RATE);
+      const segmentId = vad.currentSegmentId;
+      peeking = true;
+      void vad.peek().then((audio) => {
+        peeking = false;
+        if (!audio || this.vad !== vad) return;
+        lastPartialAt = performance.now();
+        provider.transcribePartial(segmentId, audio, TARGET_SAMPLE_RATE);
+      });
     }, 250);
     worklet.port.onmessage = (e: MessageEvent<Float32Array>) => vad.push(e.data);
 
@@ -203,8 +213,9 @@ export class MicCapture {
     if (this.onDeviceChange) navigator.mediaDevices.removeEventListener('devicechange', this.onDeviceChange);
     this.onDeviceChange = null;
     window.clearInterval(this.partialTimer);
-    this.vad?.flush();
     if (this.worklet) this.worklet.port.onmessage = null;
+    if (this.vad) this.vad.onSegment = null;
+    this.vad?.dispose();
     this.worklet?.disconnect();
     this.stream?.getTracks().forEach((t) => t.stop());
     await this.ctx?.close().catch(() => undefined);

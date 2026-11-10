@@ -37,6 +37,7 @@ export type WorkerOutMessage =
 const post = (msg: WorkerOutMessage) => self.postMessage(msg);
 
 let transcriber: AutomaticSpeechRecognitionPipeline | null = null;
+let generateOptions: Record<string, unknown> = {};
 let activeModel: string | null = null;
 let activeDevice: string | null = null;
 let initPromise: Promise<void> | null = null;
@@ -79,9 +80,12 @@ async function tryLoad(candidate: SttModelCandidate): Promise<AutomaticSpeechRec
     },
   });
 
+  // Whisper multilíngue: fixa inglês e transcrição (sem detecção de idioma por trecho).
+  generateOptions = candidate.multilingual ? { language: 'en', task: 'transcribe' } : {};
+
   // Aquecimento: a primeira inferência compila shaders / inicializa o runtime.
   const warmStart = performance.now();
-  await pipe(new Float32Array(16000)); // 1 s de silêncio
+  await pipe(new Float32Array(16000), generateOptions as never); // 1 s de silêncio
   console.log(`[stt-worker] ${label} carregado em ${Math.round(warmStart - started)} ms, aquecimento ${Math.round(performance.now() - warmStart)} ms`);
   return pipe;
 }
@@ -163,7 +167,7 @@ async function transcribe(req: TranscribeRequest): Promise<void> {
   }
   const started = performance.now();
   try {
-    const output = await transcriber(req.audio);
+    const output = await transcriber(req.audio, generateOptions as never);
     const text = (Array.isArray(output) ? output.map((o) => o.text).join(' ') : output.text).trim();
     post({ type: 'result', id: req.id, segmentId: req.segmentId, isFinal: req.isFinal, text, inferenceMs: performance.now() - started });
   } catch (err) {

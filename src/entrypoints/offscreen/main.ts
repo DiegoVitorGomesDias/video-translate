@@ -9,13 +9,18 @@ import {
   type BroadcastEvent,
   type GetTranscriptsResponse,
   type OffscreenMessage,
+  type SttEngineId,
   type SttModelId,
   type SttStatusEvent,
   type VadProfileId,
   type TranscriptEvent,
 } from '@/lib/messages';
 import { PCM_WORKLET_NAME, TARGET_SAMPLE_RATE } from '@/lib/audio/constants';
-import { EnergyVad, VAD_PROFILES } from '@/lib/audio/vad';
+import { SileroVad } from '@/lib/audio/silero-vad';
+import { VAD_PROFILES } from '@/lib/audio/vad';
+import { extractTermsFromTitle, mergeTerms, parseGlossary } from '@/lib/context';
+import { watchOptions, type Options } from '@/lib/options';
+import { ChromeSpeechProvider } from '@/lib/stt/chrome-speech';
 import { LocalTransformersProvider } from '@/lib/stt/local-transformers';
 import { candidatesFor } from '@/lib/stt/models';
 import type { SpeechProvider, TranscriptResult } from '@/lib/stt/SpeechProvider';
@@ -31,10 +36,14 @@ interface CaptureSession {
   ctx: AudioContext;
   source: MediaStreamAudioSourceNode;
   worklet: AudioWorkletNode;
-  vad: EnergyVad;
+  vad: SileroVad;
   provider: SpeechProvider;
   tabId: number;
   partialTimer: number;
+  /** Atualiza o glossário do provedor (título da aba + opções). */
+  setTabTitle: (title: string) => void;
+  /** Para de observar as opções. */
+  unwatch: () => void;
 }
 
 let session: CaptureSession | null = null;
@@ -95,11 +104,16 @@ function handleResult(r: TranscriptResult): void {
   broadcast(ev);
 }
 
-function createProvider(model: SttModelId): SpeechProvider {
-  const provider = new LocalTransformersProvider({
-    candidates: candidatesFor(model),
-    resolveUrl: (p) => browser.runtime.getURL(p as never),
-  });
+const resolveUrl = (p: string) => browser.runtime.getURL(p as never);
+
+function createProvider(model: SttModelId, engine: SttEngineId = 'local'): SpeechProvider {
+  const provider: SpeechProvider =
+    engine === 'chrome'
+      ? new ChromeSpeechProvider()
+      : new LocalTransformersProvider({
+          candidates: candidatesFor(model),
+          resolveUrl,
+        });
   provider.onStatus = (s) => {
     lastStatus = { type: 'stt-status', ...s };
     if (s.state === 'loading' && s.progress !== undefined) log(`modelo: ${s.message} ${s.progress.toFixed(0)}%`);
@@ -110,15 +124,15 @@ function createProvider(model: SttModelId): SpeechProvider {
   return provider;
 }
 
-async function startCapture(streamId: string, tabId: number, model: SttModelId, profile: VadProfileId): Promise<void> {
+async function startCapture(streamId: string, tabId: number, model: SttModelId, engine: SttEngineId, profile: VadProfileId, tabTitle: string): Promise<void> {
   if (session) {
     log('já capturando; parando a sessão anterior');
     await stopCapture();
   }
-  log(`iniciando captura da aba ${tabId} (modelo ${model}, separação ${profile})`);
+  log(`iniciando captura da aba ${tabId} (motor ${engine}, modelo ${model}, separação ${profile})`);
   finals.length = 0;
   lastPartial = null;
-  applied = { sttModel: model, vadProfile: profile };
+  applied = { sttModel: model, vadProfile: profile, sttEngine: engine, activeEngine: engine };
 
   // 1. Stream da aba a partir do streamId obtido no background.
   const stream = await navigator.mediaDevices.getUserMedia({
@@ -147,33 +161,50 @@ async function startCapture(streamId: string, tabId: number, model: SttModelId, 
   source.connect(worklet);
   worklet.connect(ctx.destination); // saída é silêncio; só garante que process() rode
 
-  // 4. VAD por energia + provedor local.
+  // 4. VAD (Silero, com reserva por energia) + provedor.
   const vp = VAD_PROFILES[profile] ?? VAD_PROFILES.normal;
-  const vad = new EnergyVad({ sampleRate: TARGET_SAMPLE_RATE, silenceMs: vp.silenceMs, maxSegmentMs: vp.maxSegmentMs });
-  const provider = createProvider(model);
+  const vad = new SileroVad({ sampleRate: TARGET_SAMPLE_RATE, silenceMs: vp.silenceMs, maxSegmentMs: vp.maxSegmentMs, resolveUrl });
+  vad.onEngine = (vadEngine, message) => {
+    log(`detector de fala: ${vadEngine}${message ? ` (${message})` : ''}`);
+    if (applied) {
+      applied = { ...applied, vadEngine };
+      broadcast({ type: 'capture-status', status: 'started', applied });
+    }
+  };
+  let provider = createProvider(model, engine);
 
   let providerReady = false;
   let pendingSegments = 0;
+  const wrapResult = (p: SpeechProvider) => {
+    const base = p.onResult;
+    p.onResult = (r) => {
+      if (r.isFinal) pendingSegments = Math.max(0, pendingSegments - 1);
+      base?.(r);
+    };
+  };
+  wrapResult(provider);
   vad.onSegment = (seg) => {
+    if (provider.consumesStream) return;
     pendingSegments++;
     log(`trecho #${seg.id} fechado (${seg.reason}) ${seg.durationMs.toFixed(0)} ms, fila=${pendingSegments}`);
     provider.transcribe(seg);
   };
-  const baseOnResult = provider.onResult;
-  provider.onResult = (r) => {
-    if (r.isFinal) pendingSegments = Math.max(0, pendingSegments - 1);
-    baseOnResult?.(r);
-  };
 
   // Parciais: a cada 1,5 s, se há um trecho aberto com áudio suficiente.
   let lastPartialAt = 0;
+  let peeking = false;
   const partialTimer = window.setInterval(() => {
-    if (!providerReady || !vad.isSpeaking || vad.currentDurationMs < PARTIAL_MIN_MS) return;
+    if (!providerReady || provider.consumesStream || peeking) return;
+    if (!vad.isSpeaking || vad.currentDurationMs < PARTIAL_MIN_MS) return;
     if (performance.now() - lastPartialAt < PARTIAL_INTERVAL_MS - 50) return;
-    const audio = vad.peek();
-    if (!audio) return;
-    lastPartialAt = performance.now();
-    provider.transcribePartial(vad.currentSegmentId, audio, TARGET_SAMPLE_RATE);
+    const segmentId = vad.currentSegmentId;
+    peeking = true;
+    void vad.peek().then((audio) => {
+      peeking = false;
+      if (!audio || !session) return;
+      lastPartialAt = performance.now();
+      provider.transcribePartial(segmentId, audio, TARGET_SAMPLE_RATE);
+    });
   }, 250);
   vad.onSpeechStart = () => {
     lastPartialAt = performance.now(); // primeiro parcial só depois do intervalo
@@ -181,25 +212,67 @@ async function startCapture(streamId: string, tabId: number, model: SttModelId, 
 
   worklet.port.onmessage = (e: MessageEvent<Float32Array>) => vad.push(e.data);
 
+  // Glossário (título da aba + opções) para o reconhecimento do Chrome.
+  let currentTitle = tabTitle;
+  let currentOptions: Options | null = null;
+  const applyPhrases = () => {
+    if (!provider.setPhrases) return;
+    const auto = currentOptions?.useTabContext === false ? [] : extractTermsFromTitle(currentTitle);
+    const terms = mergeTerms(parseGlossary(currentOptions?.glossary ?? ''), auto);
+    provider.setPhrases(terms);
+    log(`glossário do reconhecimento: ${terms.join(', ') || '(vazio)'}`);
+  };
+  const unwatchOptions = watchOptions((o) => {
+    currentOptions = o;
+    applyPhrases();
+  });
+  const setTabTitle = (title: string) => {
+    currentTitle = title;
+    applyPhrases();
+  };
+
   // Se a aba parar de compartilhar (fechou, mudou de página), encerra.
-  stream.getAudioTracks()[0]?.addEventListener('ended', () => {
+  const track = stream.getAudioTracks()[0];
+  track?.addEventListener('ended', () => {
     log('track de áudio terminou; encerrando');
     void stopCapture();
   });
 
-  session = { stream, ctx, source, worklet, vad, provider, tabId, partialTimer };
+  session = { stream, ctx, source, worklet, vad, provider, tabId, partialTimer, setTabTitle, unwatch: unwatchOptions };
 
   if (ctx.state === 'suspended') await ctx.resume();
   log(`áudio ligado: contexto a ${ctx.sampleRate} Hz, som da aba restaurado`);
   broadcast({ type: 'capture-status', status: 'started', applied: applied ?? undefined });
 
   // O modelo carrega em paralelo; o áudio já está tocando e sendo segmentado.
-  try {
+  const startProvider = async (p: SpeechProvider): Promise<void> => {
     const t0 = performance.now();
-    await provider.start();
+    if (p.consumesStream && track) p.attachTrack?.(track);
+    await p.start();
     providerReady = true;
-    log(`provedor pronto em ${(performance.now() - t0).toFixed(0)} ms`);
+    applyPhrases();
+    log(`provedor ${p.name} pronto em ${(performance.now() - t0).toFixed(0)} ms`);
+  };
+  try {
+    await startProvider(provider);
   } catch (err) {
+    if (engine === 'chrome' && session) {
+      // Reconhecimento do Chrome indisponível: cai para o modelo local sem parar a captura.
+      console.warn('[offscreen] reconhecimento do Chrome indisponível, usando o modelo local:', err);
+      await provider.stop().catch(() => undefined);
+      provider = createProvider(model, 'local');
+      wrapResult(provider);
+      session.provider = provider;
+      applied = { ...applied!, activeEngine: 'local' };
+      broadcast({ type: 'capture-status', status: 'started', applied });
+      try {
+        await startProvider(provider);
+      } catch (err2) {
+        console.error('[offscreen] falha ao carregar o modelo:', err2);
+        broadcast({ type: 'capture-status', status: 'error', error: String(err2) });
+      }
+      return;
+    }
     console.error('[offscreen] falha ao carregar o modelo:', err);
     broadcast({ type: 'capture-status', status: 'error', error: String(err) });
   }
@@ -211,8 +284,11 @@ async function stopCapture(): Promise<void> {
   session = null;
   log('parando captura');
   window.clearInterval(s.partialTimer);
-  s.vad.flush();
+  s.unwatch();
   s.worklet.port.onmessage = null;
+  // O provedor vai ser encerrado já; um último trecho não teria tempo de ser transcrito.
+  s.vad.onSegment = null;
+  s.vad.dispose();
   s.source.disconnect();
   s.worklet.disconnect();
   s.stream.getTracks().forEach((t) => t.stop());
@@ -227,7 +303,10 @@ browser.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
   const run = async (): Promise<unknown> => {
     switch (m.type) {
       case 'start-capture':
-        await startCapture(m.streamId, m.tabId, m.sttModel, m.vadProfile ?? 'normal');
+        await startCapture(m.streamId, m.tabId, m.sttModel, m.sttEngine ?? 'local', m.vadProfile ?? 'normal', m.tabTitle ?? '');
+        return { ok: true };
+      case 'set-tab-title':
+        session?.setTabTitle(m.title);
         return { ok: true };
       case 'stop-capture':
         await stopCapture();

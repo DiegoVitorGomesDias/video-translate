@@ -47,4 +47,14 @@ export interface SpeechProvider {
 
   onResult: ((result: TranscriptResult) => void) | null;
   onStatus: ((status: SpeechProviderStatus) => void) | null;
+
+  /**
+   * Provedor que consome o stream de áudio inteiro (ex.: reconhecimento nativo do
+   * Chrome) em vez de trechos do VAD. Nesse caso `attachTrack` recebe a track e
+   * `transcribe`/`transcribePartial` são ignorados.
+   */
+  readonly consumesStream?: boolean;
+  attachTrack?(track: MediaStreamTrack): void;
+  /** Termos (nomes, siglas) para influenciar o reconhecimento, quando o provedor aceita. */
+  setPhrases?(terms: string[]): void;
 }

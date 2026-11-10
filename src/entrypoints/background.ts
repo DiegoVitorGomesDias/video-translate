@@ -177,6 +177,9 @@ async function updateTabTitle(title: string, url: string): Promise<void> {
   if (state.tabId === null) return;
   if (state.tabTitle === title && (!url || state.tabUrl === url)) return;
   await setState({ ...state, tabTitle: title, tabUrl: url || state.tabUrl });
+  if (await hasOffscreenDocument()) {
+    sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'set-tab-title', title }, 1).catch(() => undefined);
+  }
 }
 
 async function startCapture(tab: chrome.tabs.Tab): Promise<void> {
@@ -193,7 +196,16 @@ async function startCapture(tab: chrome.tabs.Tab): Promise<void> {
   // 3. Offscreen + captura (o modelo carrega lá dentro, em paralelo com a UI).
   try {
     await ensureOffscreenDocument();
-    await sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'start-capture', streamId, tabId: tab.id, sttModel: options.sttModel, vadProfile: options.sentenceSplit });
+    await sendToOffscreen({
+      target: OFFSCREEN_TARGET,
+      type: 'start-capture',
+      streamId,
+      tabId: tab.id,
+      sttModel: options.sttModel,
+      sttEngine: options.sttEngine,
+      vadProfile: options.sentenceSplit,
+      tabTitle: tab.title ?? '',
+    });
     console.log(`[background] captura iniciada na aba ${tab.id} (${tab.title ?? ''})`);
   } catch (err) {
     console.error('[background] falha ao iniciar a captura:', err);
