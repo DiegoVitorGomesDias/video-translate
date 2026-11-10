@@ -11,6 +11,8 @@ export interface SttModelCandidate {
   dtype?: string | Record<string, string>;
   /** Modelo multilíngue (Whisper grande): fixa inglês na geração para não detectar idioma errado. */
   multilingual?: boolean;
+  /** Pesos em f16: só em GPUs com o recurso WebGPU "shader-f16" (verificado antes do download). */
+  requiresF16?: boolean;
 }
 
 export interface SttModelInfo {
@@ -67,10 +69,11 @@ export const STT_MODELS: SttModelInfo[] = [
     id: 'whisper-large-v3-turbo',
     label: 'Whisper large-v3-turbo (máxima qualidade)',
     description:
-      'O melhor em sotaques, música e diálogo sobreposto. Só com WebGPU e placa com memória de sobra (~1,5 GB usados); download de ~570 MB. Sem GPU cai para o Moonshine tiny.',
-    downloadMb: { webgpu: 570, wasm: 28 },
+      'O melhor em sotaques, música e diálogo sobreposto. Só com WebGPU e placa com memória de sobra (~1,5 GB usados); download de ~570 MB (GPU com f16) ou ~760 MB. Sem GPU cai para o Moonshine tiny.',
+    downloadMb: { webgpu: 760, wasm: 28 },
     candidates: [
-      { modelId: 'onnx-community/whisper-large-v3-turbo', device: 'webgpu', dtype: { encoder_model: 'q4f16', decoder_model_merged: 'q4f16' }, multilingual: true },
+      { modelId: 'onnx-community/whisper-large-v3-turbo', device: 'webgpu', dtype: { encoder_model: 'q4f16', decoder_model_merged: 'q4f16' }, multilingual: true, requiresF16: true },
+      { modelId: 'onnx-community/whisper-large-v3-turbo', device: 'webgpu', dtype: { encoder_model: 'q4', decoder_model_merged: 'q4' }, multilingual: true },
     ],
   },
 ];

@@ -38,15 +38,43 @@ export class LocalTransformersProvider implements SpeechProvider {
 
   start(): Promise<void> {
     if (this.ready) return this.ready;
+    this.ready = this.startSequence();
+    return this.ready;
+  }
 
-    this.worker = new Worker(new URL('./local-stt.worker.ts', import.meta.url), { type: 'module' });
+  /** Tenta cada candidato num worker novo; o primeiro que carregar fica. */
+  private async startSequence(): Promise<void> {
+    const errors: string[] = [];
+    for (const candidate of this.candidates) {
+      if (candidate.device === 'webgpu' && !('gpu' in navigator)) {
+        errors.push(`${candidate.modelId} (webgpu): WebGPU indisponível neste contexto`);
+        continue;
+      }
+      const worker = new Worker(new URL('./local-stt.worker.ts', import.meta.url), { type: 'module' });
+      this.worker = worker;
+      try {
+        await this.initWorker(worker, candidate);
+        return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${candidate.modelId} (${candidate.device}): ${msg}`);
+        if (this.worker === worker) this.worker = null;
+        worker.terminate();
+      }
+    }
+    const message = `Nenhum modelo carregou:\n${errors.join('\n')}`;
+    this.onStatus?.({ state: 'error', message });
+    throw new Error(message);
+  }
 
-    this.ready = new Promise<void>((resolve, reject) => {
-      this.worker!.onmessage = (event: MessageEvent<WorkerOutMessage>) => {
+  private initWorker(worker: Worker, candidate: SttModelCandidate): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      worker.onmessage = (event: MessageEvent<WorkerOutMessage>) => {
         const msg = event.data;
         switch (msg.type) {
           case 'status':
-            this.onStatus?.({ state: msg.state, message: msg.message, progress: msg.progress, device: msg.device, model: msg.model });
+            // Erros de um candidato não vão para a UI: o próximo pode carregar.
+            if (msg.state !== 'error') this.onStatus?.({ state: msg.state, message: msg.message, progress: msg.progress, device: msg.device, model: msg.model });
             if (msg.state === 'ready') resolve();
             if (msg.state === 'error') reject(new Error(msg.message));
             break;
@@ -75,23 +103,20 @@ export class LocalTransformersProvider implements SpeechProvider {
             break;
         }
       };
-      this.worker!.onerror = (e) => {
+      worker.onerror = (e) => {
         console.error('[stt] worker falhou:', e.message);
-        this.onStatus?.({ state: 'error', message: e.message });
         reject(new Error(e.message));
       };
+      const init: WorkerInMessage = {
+        type: 'init',
+        candidate,
+        ortWasmPaths: {
+          mjs: this.resolveUrl('/onnx/ort-wasm-simd-threaded.asyncify.mjs'),
+          wasm: this.resolveUrl('/onnx/ort-wasm-simd-threaded.asyncify.wasm'),
+        },
+      };
+      worker.postMessage(init);
     });
-
-    this.post({
-      type: 'init',
-      candidates: this.candidates,
-      ortWasmPaths: {
-        mjs: this.resolveUrl('/onnx/ort-wasm-simd-threaded.asyncify.mjs'),
-        wasm: this.resolveUrl('/onnx/ort-wasm-simd-threaded.asyncify.wasm'),
-      },
-    });
-
-    return this.ready;
   }
 
   transcribe(segment: AudioSegment): void {

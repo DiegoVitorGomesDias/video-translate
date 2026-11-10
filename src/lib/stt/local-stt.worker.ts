@@ -3,6 +3,10 @@
 //
 // Fila com prioridade: finais são atendidos antes de parciais; de parciais só o mais
 // recente de cada trecho é mantido, e parciais de trechos já fechados são descartados.
+//
+// Cada worker carrega UM candidato (modelo + dispositivo). Se falhar, o provedor encerra
+// o worker e cria outro para o próximo candidato: uma falha no WebGPU (ex.: shader f16
+// indisponível) deixa o runtime ONNX inutilizável no mesmo contexto, inclusive para WASM.
 
 import { pipeline, env, type AutomaticSpeechRecognitionPipeline } from '@huggingface/transformers';
 
@@ -20,8 +24,8 @@ export interface TranscribeRequest {
 export type WorkerInMessage =
   | {
       type: 'init';
-      /** Lista de (modelo, dispositivo) para tentar em ordem; o primeiro que carregar é usado. */
-      candidates: SttModelCandidate[];
+      /** Candidato (modelo, dispositivo, dtype) que este worker deve carregar. */
+      candidate: SttModelCandidate;
       /** URLs absolutas dos arquivos do runtime ONNX dentro da extensão. */
       ortWasmPaths: { mjs: string; wasm: string };
     }
@@ -64,8 +68,22 @@ function configureEnv(ortWasmPaths: { mjs: string; wasm: string }): void {
   env.backends.onnx.wasm!.numThreads = 1;
 }
 
+/** A GPU tem o recurso "shader-f16" (necessário para pesos q4f16/fp16)? */
+async function gpuSupportsF16(): Promise<boolean> {
+  const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<{ features: Set<string> } | null> } }).gpu;
+  if (!gpu) return false;
+  try {
+    const adapter = await gpu.requestAdapter();
+    return !!adapter && adapter.features.has('shader-f16');
+  } catch {
+    return false;
+  }
+}
+
 async function tryLoad(candidate: SttModelCandidate): Promise<AutomaticSpeechRecognitionPipeline> {
   const label = `${candidate.modelId} (${candidate.device})`;
+  if (candidate.device === 'webgpu' && !('gpu' in navigator)) throw new Error('WebGPU indisponível neste contexto');
+  if (candidate.requiresF16 && !(await gpuSupportsF16())) throw new Error('a GPU não tem shader-f16 (necessário para os pesos f16)');
   post({ type: 'status', state: 'loading', message: `Carregando ${label}`, progress: 0, model: candidate.modelId, device: candidate.device });
   const started = performance.now();
   const files = new Map<string, { loaded: number; total: number }>();
@@ -107,27 +125,18 @@ async function tryLoad(candidate: SttModelCandidate): Promise<AutomaticSpeechRec
   return pipe;
 }
 
-async function init(candidates: SttModelCandidate[], ortWasmPaths: { mjs: string; wasm: string }): Promise<void> {
+async function init(candidate: SttModelCandidate, ortWasmPaths: { mjs: string; wasm: string }): Promise<void> {
   configureEnv(ortWasmPaths);
-  const errors: string[] = [];
-  for (const c of candidates) {
-    if (c.device === 'webgpu' && !('gpu' in navigator)) {
-      errors.push(`${c.modelId} (webgpu): WebGPU indisponível neste contexto`);
-      continue;
-    }
-    try {
-      transcriber = await tryLoad(c);
-      activeModel = c.modelId;
-      activeDevice = c.device;
-      post({ type: 'status', state: 'ready', message: `Pronto: ${c.modelId} em ${c.device}`, model: c.modelId, device: c.device });
-      return;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[stt-worker] falha ao carregar ${c.modelId} (${c.device}):`, err);
-      errors.push(`${c.modelId} (${c.device}): ${msg}`);
-    }
+  try {
+    transcriber = await tryLoad(candidate);
+    activeModel = candidate.modelId;
+    activeDevice = candidate.device;
+    post({ type: 'status', state: 'ready', message: `Pronto: ${candidate.modelId} em ${candidate.device}`, model: candidate.modelId, device: candidate.device });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[stt-worker] falha ao carregar ${candidate.modelId} (${candidate.device}):`, err);
+    post({ type: 'status', state: 'error', message: msg, model: candidate.modelId, device: candidate.device });
   }
-  post({ type: 'status', state: 'error', message: `Nenhum modelo carregou:\n${errors.join('\n')}` });
 }
 
 function enqueue(req: TranscribeRequest): void {
@@ -196,7 +205,7 @@ self.onmessage = (event: MessageEvent<WorkerInMessage>) => {
   const msg = event.data;
   switch (msg.type) {
     case 'init':
-      initPromise = init(msg.candidates, msg.ortWasmPaths);
+      initPromise = init(msg.candidate, msg.ortWasmPaths);
       break;
     case 'transcribe':
       enqueue(msg);
