@@ -1,8 +1,17 @@
 import { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
 import { DEFAULT_OPTIONS, loadOptions, originPattern, saveOptions, type Options } from '@/lib/options';
 import { STT_MODELS } from '@/lib/stt/models';
 import { LibreTranslateProvider, chromeTranslatorBestPair, ChromeTranslatorProvider, LOCAL_MT_DOWNLOAD_MB, LocalOpusProvider, GoogleFreeProvider } from '@/lib/translate';
 import type { SttModelId } from '@/lib/messages';
+
+/** URL pública do PWA (GitHub Pages). */
+export const PWA_URL = 'https://diegovitorgomesdias.github.io/video-translate/';
+
+function encodeForUrl(obj: unknown): string {
+  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
 
 type TestState = { kind: 'idle' } | { kind: 'testing' } | { kind: 'ok'; sample: string } | { kind: 'error'; error: string };
 
@@ -13,6 +22,8 @@ export function App() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [chromeInfo, setChromeInfo] = useState<string | null>(null);
   const [fallbackTest, setFallbackTest] = useState<string | null>(null);
+  const [qr, setQr] = useState<{ url: string; dataUrl: string; withSettings: boolean } | null>(null);
+  const [includeKey, setIncludeKey] = useState(false);
 
   useEffect(() => {
     void loadOptions().then((o) => {
@@ -99,6 +110,22 @@ export function App() {
     } catch (err) {
       setFallbackTest(`Falhou: ${err instanceof Error ? err.message : String(err)}`);
     }
+  };
+
+  const makeQr = async (withSettings: boolean) => {
+    let url = PWA_URL;
+    if (withSettings) {
+      const payload = {
+        libreUrl: opts.libreUrl.trim(),
+        libreApiKey: includeKey ? opts.libreApiKey.trim() : '',
+        sttModel: opts.sttModel,
+        translationFallback: opts.translationFallback,
+        fontSize: opts.fontSize,
+      };
+      url = `${PWA_URL}#import=${encodeForUrl(payload)}`;
+    }
+    const dataUrl = await QRCode.toDataURL(url, { width: 220, margin: 1, errorCorrectionLevel: 'M' });
+    setQr({ url, dataUrl, withSettings });
   };
 
   if (!loaded) return null;
@@ -190,6 +217,41 @@ export function App() {
           <div>This is amazing!</div>
           <div className="pt">Isso é incrível!</div>
         </div>
+      </section>
+
+      <section>
+        <h2>Celular e tablet</h2>
+        <p className="hint">
+          Extensões não existem no Chrome de celular. Para isso há a versão web (PWA), que ouve o som pelo microfone e transcreve/traduz no próprio aparelho:{' '}
+          <a href={PWA_URL} target="_blank" rel="noreferrer">
+            {PWA_URL}
+          </a>
+          . Abra no Chrome do celular e use "Adicionar à tela inicial".
+        </p>
+        <div className="row">
+          <button onClick={() => void makeQr(false)}>Mostrar QR do app</button>
+          <button onClick={() => void makeQr(true)}>Exportar configurações (QR)</button>
+          <label style={{ fontWeight: 400, display: 'flex', gap: 6, alignItems: 'center', margin: 0 }}>
+            <input type="checkbox" checked={includeKey} onChange={(e) => setIncludeKey(e.target.checked)} /> incluir chave do LibreTranslate
+          </label>
+        </div>
+        {qr && (
+          <div className="row" style={{ alignItems: 'flex-start' }}>
+            <img src={qr.dataUrl} alt="QR code" width={220} height={220} style={{ borderRadius: 8, background: '#fff' }} />
+            <div className="hint" style={{ flex: 1, wordBreak: 'break-all' }}>
+              {qr.withSettings
+                ? 'Leia com a câmera do celular: o app abre e pergunta se quer importar a URL do LibreTranslate, o modelo, o fallback de tradução e a fonte.'
+                : 'Leia com a câmera do celular para abrir o app.'}
+              <br />
+              <a href={qr.url} target="_blank" rel="noreferrer">
+                {qr.url.length > 120 ? `${qr.url.slice(0, 120)}…` : qr.url}
+              </a>
+              {qr.withSettings && opts.libreUrl.includes('localhost') && (
+                <p style={{ color: 'var(--danger)' }}>Atenção: "localhost" no celular aponta para o próprio celular. Troque pelo IP do computador na rede Wi-Fi (ex.: http://192.168.0.10:5000) antes de exportar.</p>
+              )}
+            </div>
+          </div>
+        )}
       </section>
 
       <div className="row">

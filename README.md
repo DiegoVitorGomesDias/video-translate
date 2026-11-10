@@ -1,6 +1,6 @@
-# Video Translate Extension
+# Video Translate
 
-Extensão Chrome (Manifest V3) que captura o áudio de um vídeo tocando na aba, transcreve o inglês localmente no navegador e (nas próximas fases) mostra a tradução em português. O plano completo está em [PLANO.md](PLANO.md).
+Extensão Chrome (Manifest V3) que captura o áudio de um vídeo tocando na aba, transcreve o inglês localmente no navegador e mostra a tradução em português num painel lateral. Para celular e tablet há a **versão web (PWA)**, que ouve pelo microfone: https://diegovitorgomesdias.github.io/video-translate/ (ver [No celular](#no-celular-e-tablet-pwa)). O plano completo está em [PLANO.md](PLANO.md).
 
 ## Estado atual: Fase 1 (MVP) implementada
 
@@ -63,6 +63,7 @@ pnpm build
 - `pnpm build` gera a extensão em `.output/chrome-mv3/`.
 - `pnpm dev` roda o WXT em modo de desenvolvimento (abre um Chrome próprio com a extensão carregada e recarrega a cada mudança).
 - `pnpm compile` só roda o `tsc --noEmit`.
+- `pnpm icons` regenera os ícones PNG (extensão e PWA).
 - `pnpm test` roda os testes do segmentador de frases (node:test).
 
 ## Como testar no Chrome
@@ -127,11 +128,33 @@ Resultado de referência (Chrome for Testing 146 headless, GPU por software): Mo
 - A extensão ainda não tem ícones próprios (Chrome usa o padrão).
 - Em `chrome://` e páginas da Chrome Web Store o `tabCapture` não funciona.
 
+## No celular e tablet (PWA)
+
+Extensões não existem no Chrome de Android/iOS, então a versão móvel é um app web instalável (PWA) em `pwa/`, publicado em **https://diegovitorgomesdias.github.io/video-translate/**. Ele reaproveita os mesmos módulos da extensão (`src/lib`: VAD, STT local com transformers.js, segmentador, tradutores), mas captura o som **pelo microfone**.
+
+Como usar:
+
+1. Abra a URL no Chrome do celular (ou leia o QR mostrado em Opções → "Celular e tablet" na extensão). No menu do Chrome, **"Adicionar à tela inicial"** para instalar.
+2. Toque em **Iniciar** e permita o microfone. Deixe o som do vídeo audível (TV, notebook, outro aparelho). A tela fica acesa enquanto captura (Wake Lock).
+3. Na primeira vez o app baixa o modelo (Moonshine tiny, ~28 MB em CPU / ~110 MB com WebGPU) e o tradutor local (~113 MB). Depois disso funciona offline: o service worker guarda o app, o runtime ONNX e os modelos em cache.
+4. ⚙ abre as configurações: URL do LibreTranslate (use o **IP do computador** na mesma rede Wi-Fi, não `localhost`), fallback de tradução (no aparelho, Google ou nenhum), modelo, fonte.
+
+**Exportar configurações do computador para o celular**: em Opções da extensão → "Exportar configurações (QR)". O QR aponta para a URL do app com as configurações no fragmento (`#import=…`, base64url de um JSON); o app pergunta antes de importar. A chave do LibreTranslate só entra se você marcar a caixa.
+
+Limitações: a qualidade cai com ruído do ambiente e distância do alto-falante (o modelo foi feito para áudio limpo); no iPhone não há WebGPU, então tudo roda em WASM e fica mais lento (prefira o modelo tiny); a Translator API do Chrome só existe no Chrome Android recente; o Safari precisa de iOS 16.4+ para PWA com microfone.
+
+Desenvolvimento: `pnpm pwa:dev` (servidor local), `pnpm pwa:build` (gera `pwa/dist`), `pnpm pwa:compile` (tsc). O build é publicado automaticamente pelo workflow `.github/workflows/pages.yml` a cada push na `main`; para isso, **ative uma vez** em GitHub → Settings → Pages → Source: "GitHub Actions". Autoteste com microfone falso (um WAV de fala em inglês): `node scripts/selftest-pwa.mjs /caminho/para/chrome`.
+
 ## Estrutura
 
 ```
 video-translate/
 ├── wxt.config.ts                 # manifest MV3 (permissões, CSP com wasm-unsafe-eval, action sem popup)
+├── pwa/                          # versão web para celular (Vite + React + vite-plugin-pwa), reusa src/lib
+│   ├── vite.config.ts, index.html
+│   └── src/ App.tsx, capture.ts (microfone → worklet → VAD → STT), Settings.tsx, settings.ts
+├── .github/workflows/pages.yml   # publica pwa/dist no GitHub Pages
+├── scripts/selftest-pwa.mjs      # autoteste do PWA com microfone falso
 ├── scripts/copy-ort.mjs          # copia o runtime ONNX para public/onnx
 ├── scripts/selftest-chrome.mjs   # autoteste em Chrome headless (modelo + páginas)
 ├── tests/segmenter.test.ts       # testes do segmentador (pnpm test)

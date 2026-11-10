@@ -170,6 +170,9 @@ Janela da extensão com frases em inglês e tradução abaixo (via LibreTranslat
 **Fase 1b: painel lateral** ✅ 10/11/2026
 A pedido do usuário, o viewer passou a abrir como painel lateral (drawer) dentro da própria página do vídeo, em vez de janela separada: content script injetado sob demanda com Shadow DOM + iframe de `viewer.html` (que continua página da extensão). Redimensionável, recolhível, reinjetado ao navegar na aba. A janela separada continua disponível nas opções e por um atalho no cabeçalho.
 
+**Fase 1c: PWA móvel** ✅ 10/11/2026
+Pedido do usuário: usar em celular e tablet. Como extensões não existem no Chrome móvel, foi feito um app web instalável (`pwa/`, Vite + React + vite-plugin-pwa) que reaproveita `src/lib` (VAD, STT local, segmentador, tradutores) e captura pelo **microfone** (echoCancellation off, noiseSuppression/autoGainControl on), com Wake Lock, tema, fonte, configurações em localStorage e cache offline do app, do runtime ONNX e dos modelos. Publicado em GitHub Pages por GitHub Actions. A extensão exporta as configurações por QR code (`#import=` na URL do app), que o app confirma antes de importar. Teste automático com microfone falso (WAV de fala).
+
 **Fase 2: seleção do vídeo**
 Overlay para escolher o vídeo, pausa/retomada seguindo o vídeo, título do vídeo na janela, tentativa de `captureStream()` para isolar o áudio.
 
@@ -195,3 +198,4 @@ Preparar para a Chrome Web Store (ícones, descrição, política de privacidade
 4. Uso local, mas estruturado desde o começo para publicação na Chrome Web Store.
 5. UI em React.
 6. (09/11/2026) Último recurso de tradução: modelo local no navegador (opus-mt) por padrão; Google não oficial só se o usuário escolher.
+7. (10/11/2026) Celular/tablet: app web (PWA) por microfone, publicado em GitHub Pages, com exportação das configurações da extensão por QR.
