@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SentenceSegmenter, normalize, type Sentence } from '@/lib/segmenter';
 import { createTranslator, type LocalOpusStatus, type TranslatorSelection } from '@/lib/translate';
 import type { SpeechProviderStatus, TranscriptResult } from '@/lib/stt/SpeechProvider';
-import { MicCapture, resolveAsset } from './capture';
+import { MicCapture, listMicrophones, resolveAsset, type MicDevice } from './capture';
 import { SettingsPanel } from './Settings';
 import { IMPORT_HASH_KEY, loadSettings, readImportFromHash, saveSettings, type Settings } from './settings';
 
@@ -29,9 +29,11 @@ export function App() {
   const [translator, setTranslator] = useState<TranslatorSelection | null>(null);
   const [localStatus, setLocalStatus] = useState<LocalOpusStatus | null>(null);
   const [stuckToEnd, setStuckToEnd] = useState(true);
+  const [mic, setMic] = useState<MicDevice | null>(null);
+  const [mics, setMics] = useState<MicDevice[]>([]);
 
   const capture = useRef(new MicCapture());
-  const segmenter = useRef(new SentenceSegmenter({ maxChars: 120, maxWaitMs: 5000 }));
+  const segmenter = useRef(new SentenceSegmenter({ maxChars: 90, maxWaitMs: 5000 }));
   const listRef = useRef<HTMLDivElement>(null);
   const inFlight = useRef(new Set<number>());
 
@@ -84,7 +86,7 @@ export function App() {
   // ---- Segmentação ----
   const onResult = useCallback((r: TranscriptResult) => {
     if (r.isFinal) {
-      const out = segmenter.current.push(r.text, Date.now());
+      const out = segmenter.current.push(r.text, Date.now(), r.reason ?? 'max-length');
       if (out.length) setCards((prev) => [...prev, ...out]);
       setPartial('');
     } else {
@@ -104,12 +106,21 @@ export function App() {
     setError(null);
     setStarting(true);
     try {
-      await capture.current.start(settings.sttModel, {
-        onStatus: setStt,
-        onResult,
-        onLevel: (rms) => setLevel(Math.min(1, rms * 8)),
-        onError: (m) => setError(m),
-      });
+      await capture.current.start(
+        settings.sttModel,
+        {
+          onStatus: setStt,
+          onResult,
+          onLevel: (rms) => setLevel(Math.min(1, rms * 8)),
+          onError: (m) => setError(m),
+          onDevice: (d) => {
+            setMic(d);
+            void listMicrophones().then(setMics);
+          },
+        },
+        settings.micDeviceId,
+        settings.sentenceSplit,
+      );
       setRunning(true);
     } catch (err) {
       setError(err instanceof Error ? `${err.name}: ${err.message}` : String(err));
@@ -148,6 +159,13 @@ export function App() {
   const dismissImport = () => {
     setPendingImport(null);
     history.replaceState(null, '', location.pathname + location.search);
+  };
+
+  const chooseMic = async (deviceId: string) => {
+    const next = { ...settings, micDeviceId: deviceId };
+    saveSettings(next);
+    setSettings(next);
+    await capture.current.switchMicrophone(deviceId);
   };
 
   const statusText = useMemo(() => {
@@ -200,6 +218,25 @@ export function App() {
           <div className="level">
             <div style={{ width: `${Math.round(level * 100)}%` }} />
           </div>
+        )}
+        {running && mics.length > 1 && (
+          <div className="row" style={{ marginTop: 6 }}>
+            <span>🎤</span>
+            <select className="mic" value={settings.micDeviceId} onChange={(e) => void chooseMic(e.target.value)} title="Microfone em uso">
+              <option value="">Automático: microfone do aparelho{mic ? ` (${mic.label})` : ''}</option>
+              {mics.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label}
+                  {d.isHeadset ? ' (fone)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {running && mic?.isHeadset && (
+          <p className="notice warn" style={{ margin: '6px 0 0' }}>
+            Usando o microfone do fone ({mic.label}). Para ouvir o vídeo, prefira o microfone do aparelho no seletor acima.
+          </p>
         )}
       </header>
 

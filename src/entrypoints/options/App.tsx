@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { DEFAULT_OPTIONS, loadOptions, originPattern, saveOptions, type Options } from '@/lib/options';
 import { STT_MODELS } from '@/lib/stt/models';
+import { VAD_PROFILES, type VadProfile } from '@/lib/audio/vad';
 import { LibreTranslateProvider, chromeTranslatorBestPair, ChromeTranslatorProvider, LOCAL_MT_DOWNLOAD_MB, LocalOpusProvider, GoogleFreeProvider } from '@/lib/translate';
 import type { SttModelId } from '@/lib/messages';
 
@@ -119,6 +120,7 @@ export function App() {
         libreUrl: opts.libreUrl.trim(),
         libreApiKey: includeKey ? opts.libreApiKey.trim() : '',
         sttModel: opts.sttModel,
+        sentenceSplit: opts.sentenceSplit,
         translationFallback: opts.translationFallback,
         fontSize: opts.fontSize,
       };
@@ -201,6 +203,18 @@ export function App() {
             </div>
           </label>
         ))}
+      </section>
+
+      <section>
+        <h2>Separação de frases</h2>
+        {(Object.keys(VAD_PROFILES) as VadProfile[]).map((id) => (
+          <label key={id} className={`model ${opts.sentenceSplit === id ? 'selected' : ''}`}>
+            <input type="radio" name="sentenceSplit" value={id} checked={opts.sentenceSplit === id} onChange={() => update('sentenceSplit', id)} />
+            <span className="name">{VAD_PROFILES[id].label}{id === 'normal' ? ' (padrão)' : ''}</span>
+            <div className="desc">{VAD_PROFILES[id].description}</div>
+          </label>
+        ))}
+        <p className="hint">Vale na próxima captura. Independente do nível, uma pausa na fala sempre fecha a frase, e frases coladas sem pontuação são separadas por heurística.</p>
       </section>
 
       <section>

@@ -185,7 +185,7 @@ async function startCapture(tab: chrome.tabs.Tab): Promise<void> {
   // 3. Offscreen + captura (o modelo carrega lá dentro, em paralelo com a UI).
   try {
     await ensureOffscreenDocument();
-    await sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'start-capture', streamId, tabId: tab.id, sttModel: options.sttModel });
+    await sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'start-capture', streamId, tabId: tab.id, sttModel: options.sttModel, vadProfile: options.sentenceSplit });
     console.log(`[background] captura iniciada na aba ${tab.id} (${tab.title ?? ''})`);
   } catch (err) {
     console.error('[background] falha ao iniciar a captura:', err);

@@ -41,7 +41,7 @@ export function App() {
   const [translatorRetry, setTranslatorRetry] = useState(0);
   const [localStatus, setLocalStatus] = useState<LocalOpusStatus | null>(null);
 
-  const segmenter = useRef(new SentenceSegmenter({ maxChars: 120, maxWaitMs: 5000 }));
+  const segmenter = useRef(new SentenceSegmenter({ maxChars: 90, maxWaitMs: 5000 }));
   const listRef = useRef<HTMLDivElement>(null);
   const inFlight = useRef(new Set<number>());
 
@@ -103,7 +103,7 @@ export function App() {
 
   // ---- Transcrições: histórico + eventos ----
   const pushFinal = useCallback((ev: TranscriptEvent) => {
-    const sentences = segmenter.current.push(ev.text, ev.readyAt);
+    const sentences = segmenter.current.push(ev.text, ev.readyAt, ev.reason ?? 'max-length');
     if (sentences.length) setCards((prev) => [...prev, ...sentences]);
     setPartial((p) => (p && ev.text ? '' : p));
   }, []);

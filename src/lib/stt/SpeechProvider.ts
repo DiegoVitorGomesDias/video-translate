@@ -6,6 +6,8 @@ export interface TranscriptResult {
   text: string;
   /** Resultado fechado (não muda mais) ou provisório (texto parcial de um trecho aberto). */
   isFinal: boolean;
+  /** Como o trecho de áudio foi fechado (só em finais). */
+  reason?: AudioSegment['reason'];
   /** Latência total (ms) entre o fim do áudio enviado e a chegada do texto. */
   latencyMs: number;
   /** Tempo (ms) só da inferência do modelo. */

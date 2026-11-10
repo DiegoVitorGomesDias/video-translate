@@ -10,10 +10,11 @@ import {
   type OffscreenMessage,
   type SttModelId,
   type SttStatusEvent,
+  type VadProfileId,
   type TranscriptEvent,
 } from '@/lib/messages';
 import { PCM_WORKLET_NAME, TARGET_SAMPLE_RATE } from '@/lib/audio/constants';
-import { EnergyVad } from '@/lib/audio/vad';
+import { EnergyVad, VAD_PROFILES } from '@/lib/audio/vad';
 import { LocalTransformersProvider } from '@/lib/stt/local-transformers';
 import { candidatesFor } from '@/lib/stt/models';
 import type { SpeechProvider, TranscriptResult } from '@/lib/stt/SpeechProvider';
@@ -22,7 +23,6 @@ import type { SpeechProvider, TranscriptResult } from '@/lib/stt/SpeechProvider'
 const PARTIAL_INTERVAL_MS = 1500;
 /** Trecho precisa ter pelo menos isso de áudio para valer um parcial. */
 const PARTIAL_MIN_MS = 1000;
-const MAX_SEGMENT_MS = 6000;
 const HISTORY_LIMIT = 500;
 
 interface CaptureSession {
@@ -63,6 +63,7 @@ function toEvent(r: TranscriptResult): TranscriptEvent {
     segmentId: r.segmentId,
     text: r.text,
     isFinal: r.isFinal,
+    reason: r.reason,
     audioEndedAt: r.audioEndedAt,
     readyAt: Date.now(),
     latencyMs: r.latencyMs,
@@ -107,12 +108,12 @@ function createProvider(model: SttModelId): SpeechProvider {
   return provider;
 }
 
-async function startCapture(streamId: string, tabId: number, model: SttModelId): Promise<void> {
+async function startCapture(streamId: string, tabId: number, model: SttModelId, profile: VadProfileId): Promise<void> {
   if (session) {
     log('já capturando; parando a sessão anterior');
     await stopCapture();
   }
-  log(`iniciando captura da aba ${tabId} (modelo ${model})`);
+  log(`iniciando captura da aba ${tabId} (modelo ${model}, separação ${profile})`);
   finals.length = 0;
   lastPartial = null;
 
@@ -144,7 +145,8 @@ async function startCapture(streamId: string, tabId: number, model: SttModelId):
   worklet.connect(ctx.destination); // saída é silêncio; só garante que process() rode
 
   // 4. VAD por energia + provedor local.
-  const vad = new EnergyVad({ sampleRate: TARGET_SAMPLE_RATE, silenceMs: 400, maxSegmentMs: MAX_SEGMENT_MS });
+  const vp = VAD_PROFILES[profile] ?? VAD_PROFILES.normal;
+  const vad = new EnergyVad({ sampleRate: TARGET_SAMPLE_RATE, silenceMs: vp.silenceMs, maxSegmentMs: vp.maxSegmentMs });
   const provider = createProvider(model);
 
   let providerReady = false;
@@ -222,7 +224,7 @@ browser.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
   const run = async (): Promise<unknown> => {
     switch (m.type) {
       case 'start-capture':
-        await startCapture(m.streamId, m.tabId, m.sttModel);
+        await startCapture(m.streamId, m.tabId, m.sttModel, m.vadProfile ?? 'normal');
         return { ok: true };
       case 'stop-capture':
         await stopCapture();

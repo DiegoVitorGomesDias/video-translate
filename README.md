@@ -8,8 +8,9 @@ O que a extensão faz hoje:
 
 - **Clique no ícone** numa aba com vídeo: o service worker pede `chrome.tabCapture.getMediaStreamId`, cria o documento offscreen, começa a captura e mostra o viewer como um **painel lateral** dentro da própria página (padrão) ou numa **janela separada** (opção). O ícone mostra o selo `REC`. Clicar de novo reabre/foca o painel.
 - **Áudio**: o offscreen faz `getUserMedia` com o stream da aba, liga o som de volta no `AudioContext.destination` (o vídeo continua audível) e um `AudioWorklet` gera mono 16 kHz.
-- **Transcrição local** com `@huggingface/transformers` num Web Worker: Moonshine tiny por padrão (WebGPU, com fallback para WASM), Moonshine base ou Whisper base.en nas opções. Um VAD por energia fecha trechos com ~400 ms de silêncio ou 6 s no máximo; enquanto um trecho está aberto, a cada 1,5 s sai um **texto provisório** (cinza, itálico) na última linha.
-- **Frases**: os finais são divididos por `. ? !` (respeitando abreviações, iniciais e decimais); restos sem pontuação são juntados ao próximo final ou fechados após 120 caracteres / 5 s.
+- **Transcrição local** com `@huggingface/transformers` num Web Worker: Moonshine tiny por padrão (WebGPU, com fallback para WASM), Moonshine base ou Whisper base.en nas opções. Um VAD por energia fecha trechos em pausas de 0,25 s ou 4 s no máximo (configurável); enquanto um trecho está aberto, a cada 1,5 s sai um **texto provisório** (cinza, itálico) na última linha.
+- **Frases**: cada pausa na fala fecha a frase em aberto; os finais são divididos por `. ? !` (respeitando abreviações, iniciais e decimais) e frases coladas sem pontuação são separadas por heurística (quebra antes de iniciadores como *What*, *You*, *And* em maiúscula após palavra minúscula, sem tocar em nomes como *Doctor House* ou *New York*). Restos de trechos cortados por tamanho são juntados ao próximo final ou fechados após 90 caracteres (na vírgula/conjunção mais próxima) ou 5 s.
+- **Separação de frases** (opções, extensão e PWA): Rápida (pausa de 0,2 s / trecho de 3 s), Normal (0,25 s / 4 s, padrão) ou Longa (0,4 s / 6 s). Ao atingir o máximo, o trecho é cortado no ponto mais silencioso dos últimos 1,2 s, para não partir palavras.
 - **Tradução EN→PT** na janela: **LibreTranslate** se houver URL configurada e a instância responder, senão a **Translator API do Chrome** (138+, local, sem chave). O cabeçalho mostra qual está ativo. Cache por frase.
 - **Painel lateral**: um content script injetado sob demanda cria um host com Shadow DOM fixo à direita (400 px, redimensionável arrastando a borda esquerda) com um iframe de `viewer.html`, que continua sendo página da extensão (workers, cache, fetch). Botão `›` recolhe (a captura continua; uma aba fina reabre), `✕` fecha e para. Se a página recarregar ou navegar (YouTube/Prime são SPAs), o painel é reinjetado. No cabeçalho dá para trocar entre "abrir em janela" e "voltar para o painel".
 - **Parar**: botão Parar, fechar o painel/janela ou fechar a aba capturada.
@@ -122,7 +123,7 @@ Resultado de referência (Chrome for Testing 146 headless, GPU por software): Mo
 - O painel precisa de `web_accessible_resources` para `viewer.html` em `<all_urls>`; é só o HTML do viewer, que não expõe dados.
 
 - WebGPU dentro de um Web Worker de documento offscreen pode não estar disponível em todas as versões do Chrome; nesse caso o worker cai para WASM automaticamente (mais lento).
-- O VAD é por energia, então música de fundo alta pode manter o trecho "aberto" até o limite de 6 s, e trechos só de música podem virar texto sem sentido.
+- O VAD é por energia, então música de fundo alta pode manter o trecho "aberto" até o limite do perfil (3 a 6 s), e trechos só de música podem virar texto sem sentido.
 - A Translator API do Chrome pode falhar com `NotSupportedError` para EN→PT em alguns Chromes (observado num Chrome em Linux); nesse caso a extensão usa o fallback 2. Em Edge/Brave a API pode não existir.
 - Os modelos Moonshine base e Whisper base.en foram configurados mas ainda não medidos nesta máquina; o Whisper processa janelas de 30 s, então a latência é maior.
 - A extensão ainda não tem ícones próprios (Chrome usa o padrão).
@@ -137,7 +138,8 @@ Como usar:
 1. Abra a URL no Chrome do celular (ou leia o QR mostrado em Opções → "Celular e tablet" na extensão). No menu do Chrome, **"Adicionar à tela inicial"** para instalar.
 2. Toque em **Iniciar** e permita o microfone. Deixe o som do vídeo audível (TV, notebook, outro aparelho). A tela fica acesa enquanto captura (Wake Lock).
 3. Na primeira vez o app baixa o modelo (Moonshine tiny, ~28 MB em CPU / ~110 MB com WebGPU) e o tradutor local (~113 MB). Depois disso funciona offline: o service worker guarda o app, o runtime ONNX e os modelos em cache.
-4. ⚙ abre as configurações: URL do LibreTranslate (use o **IP do computador** na mesma rede Wi-Fi, não `localhost`), fallback de tradução (no aparelho, Google ou nenhum), modelo, fonte.
+4. **Fone de ouvido** (Bluetooth ou com fio) pode ficar conectado: o app escolhe por padrão o microfone do próprio aparelho, que fica perto do som, e não o do fone; se o fone conectar ou desconectar no meio, ele refaz a escolha sem parar. Dá para trocar o microfone no seletor 🎤 do cabeçalho ou em ⚙. Observação: se o vídeo estiver tocando **no mesmo celular** com fone, o microfone não ouve nada; nesse caso o som precisa sair por um alto-falante.
+5. ⚙ abre as configurações: URL do LibreTranslate (use o **IP do computador** na mesma rede Wi-Fi, não `localhost`), fallback de tradução (no aparelho, Google ou nenhum), modelo, fonte.
 
 **Exportar configurações do computador para o celular**: em Opções da extensão → "Exportar configurações (QR)". O QR aponta para a URL do app com as configurações no fragmento (`#import=…`, base64url de um JSON); o app pergunta antes de importar. A chave do LibreTranslate só entra se você marcar a caixa.
 
@@ -172,7 +174,7 @@ video-translate/
         ├── options.ts            # chrome.storage.local
         ├── segmenter.ts          # junta finais em frases
         ├── audio/pcm-worklet.ts  # AudioWorkletProcessor: mono 16 kHz
-        ├── audio/vad.ts          # VAD por energia (400 ms silêncio / 6 s máx)
+        ├── audio/vad.ts          # VAD por energia (perfis rápida/normal/longa, corte no ponto mais silencioso)
         ├── stt/
         │   ├── SpeechProvider.ts        # interface comum dos provedores de transcrição
         │   ├── models.ts                # catálogo de modelos (tiny, base, whisper)

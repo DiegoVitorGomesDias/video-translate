@@ -1,21 +1,26 @@
 // Configurações do PWA em localStorage (equivalente ao chrome.storage.local da extensão).
-import type { SttModelId } from '@/lib/messages';
+import type { SttModelId, VadProfileId } from '@/lib/messages';
 import { DEFAULT_STT_MODEL, STT_MODELS } from '@/lib/stt/models';
 
 export interface Settings {
   libreUrl: string;
   libreApiKey: string;
   sttModel: SttModelId;
+  sentenceSplit: VadProfileId;
   translationFallback: 'local' | 'google' | 'none';
   fontSize: number;
+  /** deviceId do microfone; '' = automático (prefere o microfone do próprio aparelho). */
+  micDeviceId: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   libreUrl: '',
   libreApiKey: '',
   sttModel: DEFAULT_STT_MODEL,
+  sentenceSplit: 'normal',
   translationFallback: 'local',
   fontSize: 18,
+  micDeviceId: '',
 };
 
 const KEY = 'videoTranslate.settings';
@@ -47,8 +52,10 @@ export function sanitize(input: Partial<Settings> | Record<string, unknown>): Se
     libreUrl: typeof s.libreUrl === 'string' && /^https?:\/\//.test(s.libreUrl) ? s.libreUrl : '',
     libreApiKey: typeof s.libreApiKey === 'string' ? s.libreApiKey : '',
     sttModel: modelOk ? (s.sttModel as SttModelId) : DEFAULT_STT_MODEL,
+    sentenceSplit: s.sentenceSplit === 'fast' || s.sentenceSplit === 'long' ? s.sentenceSplit : 'normal',
     translationFallback: fallbackOk ? s.translationFallback! : 'local',
     fontSize: Number.isFinite(font) && font >= 12 && font <= 32 ? font : 18,
+    micDeviceId: typeof s.micDeviceId === 'string' ? s.micDeviceId : '',
   };
 }
 

@@ -35,12 +35,13 @@ test('junta restos sem pontuação com o próximo final', () => {
   assert.equal(seg.pending, 'Next');
 });
 
-test('força fechamento por tamanho', () => {
+test('força fechamento por tamanho, cortando num limite de palavra e guardando o resto', () => {
   const seg = new SentenceSegmenter({ maxChars: 40 });
   const out = seg.push('this is a long run on sentence without any punctuation at all', 0);
   assert.equal(out.length, 1);
   assert.equal(out[0]!.forced, true);
-  assert.equal(seg.pending, '');
+  assert.ok(out[0]!.text.length <= 40);
+  assert.equal(`${out[0]!.text} ${seg.pending}`, 'this is a long run on sentence without any punctuation at all');
 });
 
 test('força fechamento por tempo sem pontuação', () => {
@@ -80,4 +81,46 @@ test('ids são sequenciais e flush fecha o resto', () => {
   const b = seg.flush(10);
   assert.equal(b[0]!.id, 3);
   assert.equal(b[0]!.text, 'three');
+});
+
+// ---- Frases coladas e fechamento por pausa (v0.4.1) ----
+import { splitGlued, cutAt } from '../src/lib/segmenter.ts';
+
+test('separa frases coladas antes de iniciadores em maiúscula', () => {
+  const a = splitSentences("I don't know who She and she is practically living together What did you just order?");
+  assert.equal(a.sentences.at(-1), 'What did you just order?');
+  assert.ok(!a.sentences.some((s) => s.includes('living together') && s.includes('What did')));
+  const b = splitSentences("That's what leads you to sandpaper yes but i don't like eating the same thing two days in a row You froze nursing");
+  assert.ok(b.sentences.some((s) => s.endsWith('two days in a row')));
+  assert.equal(b.rest, 'You froze nursing');
+});
+
+test('não quebra em nomes próprios, títulos nem após vírgula', () => {
+  assert.deepEqual(splitGlued('I talked to Doctor House yesterday'), ['I talked to Doctor House yesterday']);
+  assert.deepEqual(splitGlued('We went to New York'), ['We went to New York']);
+  assert.deepEqual(splitGlued('I think, So do I'), ['I think, So do I']);
+  assert.deepEqual(splitGlued('so I said Yes'), ['so I said Yes']); // fragmento final de 1 palavra não quebra
+});
+
+test('fechamento por pausa encerra a frase sem pontuação', () => {
+  const seg = new SentenceSegmenter();
+  const out = seg.push('and my goal is for you to come away', 0, 'silence');
+  assert.equal(out.length, 1);
+  assert.equal(out[0]!.text, 'and my goal is for you to come away');
+  assert.equal(out[0]!.forced, false);
+  assert.equal(seg.pending, '');
+  // Já com trecho cortado por tamanho, o resto espera o próximo final.
+  assert.deepEqual(seg.push('feeling like you could', 0, 'max-length'), []);
+  assert.equal(seg.pending, 'feeling like you could');
+});
+
+test('limite de 90 caracteres corta na vírgula ou conjunção', () => {
+  const seg = new SentenceSegmenter();
+  const text = 'the first part of this very long sentence goes on and on without any stop, and then the second part keeps going even further than that';
+  const out = seg.push(text, 0, 'max-length');
+  assert.ok(out.length >= 1);
+  assert.ok(out[0]!.text.endsWith('without any stop,') || out[0]!.text.endsWith('without any stop'));
+  const [head, tail] = cutAt('alpha beta gamma and delta epsilon zeta', 25);
+  assert.equal(head, 'alpha beta gamma');
+  assert.equal(tail, 'and delta epsilon zeta');
 });

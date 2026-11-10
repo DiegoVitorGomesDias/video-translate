@@ -8,6 +8,8 @@ export const DRAWER_TARGET = 'drawer' as const;
 export type DisplayMode = 'drawer' | 'window';
 
 export type SttModelId = 'moonshine-tiny' | 'moonshine-base' | 'whisper-base.en';
+export type VadProfileId = 'fast' | 'normal' | 'long';
+export type SegmentEndReason = 'silence' | 'max-length' | 'flush';
 
 // ---- Para o offscreen ----
 
@@ -17,6 +19,7 @@ export interface StartCaptureMessage {
   streamId: string;
   tabId: number;
   sttModel: SttModelId;
+  vadProfile: VadProfileId;
 }
 
 export interface StopCaptureMessage {
@@ -97,6 +100,8 @@ export interface TranscriptEvent {
   segmentId: number;
   text: string;
   isFinal: boolean;
+  /** Como o trecho de áudio terminou (só em finais). */
+  reason?: SegmentEndReason;
   /** performance.now() do offscreen no fechamento (final) ou no corte (parcial). */
   audioEndedAt: number;
   /** Date.now() em que o texto ficou pronto. */

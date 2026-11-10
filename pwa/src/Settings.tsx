@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { listMicrophones, type MicDevice } from './capture';
 import { STT_MODELS } from '@/lib/stt/models';
+import { VAD_PROFILES, type VadProfile } from '@/lib/audio/vad';
 import { LOCAL_MT_DOWNLOAD_MB, LibreTranslateProvider } from '@/lib/translate';
 import type { Settings } from './settings';
 import type { SttModelId } from '@/lib/messages';
@@ -7,6 +9,10 @@ import type { SttModelId } from '@/lib/messages';
 export function SettingsPanel({ value, onSave, onClose }: { value: Settings; onSave: (s: Settings) => void; onClose: () => void }) {
   const [s, setS] = useState<Settings>(value);
   const [test, setTest] = useState<string | null>(null);
+  const [mics, setMics] = useState<MicDevice[]>([]);
+  useEffect(() => {
+    void listMicrophones().then(setMics).catch(() => setMics([]));
+  }, []);
   const update = <K extends keyof Settings>(k: K, v: Settings[K]) => setS((p) => ({ ...p, [k]: v }));
 
   const testLibre = async () => {
@@ -54,6 +60,28 @@ export function SettingsPanel({ value, onSave, onClose }: { value: Settings; onS
         ))}
       </select>
       <p className="hint">No celular prefira o tiny: os outros ficam lentos sem GPU. Vale na próxima captura.</p>
+
+      <label htmlFor="split">Separação de frases</label>
+      <select id="split" value={s.sentenceSplit} onChange={(e) => update('sentenceSplit', e.target.value as VadProfile)}>
+        {(Object.keys(VAD_PROFILES) as VadProfile[]).map((id) => (
+          <option key={id} value={id}>
+            {VAD_PROFILES[id].label}{id === 'normal' ? ' (padrão)' : ''}: pausa {VAD_PROFILES[id].silenceMs} ms, até {VAD_PROFILES[id].maxSegmentMs / 1000} s
+          </option>
+        ))}
+      </select>
+      <p className="hint">{VAD_PROFILES[s.sentenceSplit].description} Vale na próxima captura.</p>
+
+      <label htmlFor="mic">Microfone</label>
+      <select id="mic" value={s.micDeviceId} onChange={(e) => update('micDeviceId', e.target.value)}>
+        <option value="">Automático: microfone do aparelho (mesmo com fone conectado)</option>
+        {mics.map((d) => (
+          <option key={d.deviceId} value={d.deviceId}>
+            {d.label}
+            {d.isHeadset ? ' (fone)' : ''}
+          </option>
+        ))}
+      </select>
+      <p className="hint">Com fone Bluetooth ou com fio conectado, o app continua ouvindo pelo microfone do aparelho, que fica perto do som. A lista completa aparece depois da primeira captura (permissão).</p>
 
       <label htmlFor="fontSize">Tamanho da fonte: {s.fontSize}px</label>
       <input id="fontSize" type="range" min={12} max={32} value={s.fontSize} onChange={(e) => update('fontSize', Number(e.target.value))} />

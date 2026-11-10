@@ -14,6 +14,7 @@ export interface LocalTransformersOptions {
 interface Pending {
   segmentId: number;
   isFinal: boolean;
+  reason?: AudioSegment['reason'];
   audioEndedAt: number;
   audioMs: number;
 }
@@ -57,6 +58,7 @@ export class LocalTransformersProvider implements SpeechProvider {
               segmentId: p.segmentId,
               text: msg.text,
               isFinal: p.isFinal,
+              reason: p.reason,
               latencyMs: performance.now() - p.audioEndedAt,
               inferenceMs: msg.inferenceMs,
               audioMs: p.audioMs,
@@ -93,17 +95,17 @@ export class LocalTransformersProvider implements SpeechProvider {
   }
 
   transcribe(segment: AudioSegment): void {
-    this.send(segment.id, true, segment.audio, segment.sampleRate, segment.endedAt);
+    this.send(segment.id, true, segment.audio, segment.sampleRate, segment.endedAt, segment.reason);
   }
 
   transcribePartial(segmentId: number, audio: Float32Array, sampleRate: number): void {
     this.send(segmentId, false, audio, sampleRate, performance.now());
   }
 
-  private send(segmentId: number, isFinal: boolean, audio: Float32Array, sampleRate: number, audioEndedAt: number): void {
+  private send(segmentId: number, isFinal: boolean, audio: Float32Array, sampleRate: number, audioEndedAt: number, reason?: AudioSegment['reason']): void {
     if (!this.worker) throw new Error('Provider não iniciado');
     const id = this.nextId++;
-    this.pending.set(id, { segmentId, isFinal, audioEndedAt, audioMs: (audio.length / sampleRate) * 1000 });
+    this.pending.set(id, { segmentId, isFinal, reason, audioEndedAt, audioMs: (audio.length / sampleRate) * 1000 });
     // Transfere o buffer (zero-copy); o chamador não usa mais esse array.
     this.post({ type: 'transcribe', id, segmentId, isFinal, audio, sampleRate }, [audio.buffer]);
   }
