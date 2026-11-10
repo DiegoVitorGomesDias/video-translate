@@ -30,6 +30,7 @@ export class LocalTransformersProvider implements SpeechProvider {
   private ready: Promise<void> | null = null;
   private readonly candidates: SttModelCandidate[];
   private readonly resolveUrl: (path: string) => string;
+  private terms: string[] = [];
 
   constructor(opts: LocalTransformersOptions) {
     this.candidates = opts.candidates ?? candidatesFor('moonshine-tiny');
@@ -54,6 +55,7 @@ export class LocalTransformersProvider implements SpeechProvider {
       this.worker = worker;
       try {
         await this.initWorker(worker, candidate);
+        if (this.terms.length > 0) this.post({ type: 'set-terms', terms: this.terms });
         return;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -117,6 +119,12 @@ export class LocalTransformersProvider implements SpeechProvider {
       };
       worker.postMessage(init);
     });
+  }
+
+  /** Glossário para o prompt do Whisper (Moonshine ignora). */
+  setPhrases(terms: string[]): void {
+    this.terms = terms;
+    this.post({ type: 'set-terms', terms });
   }
 
   transcribe(segment: AudioSegment): void {

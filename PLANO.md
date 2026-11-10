@@ -102,6 +102,8 @@ Como funciona o modo local:
 2. **Modelo "Automático"** (padrão): Moonshine base em WebGPU quando há GPU; sem GPU, Moonshine tiny em WASM para manter a latência. **Whisper large-v3-turbo** (q4f16, ~570 MB, só WebGPU) entrou como opção de máxima qualidade; é multilíngue, então a geração fixa `language: 'en'`.
 3. **Motor "Reconhecimento do Chrome no dispositivo"** (opção): Web Speech API com `processLocally` (Chrome 139+), recebendo a track do `tabCapture` direto (`start(track)`, Chrome 133+) e os nomes do título/glossário como `phrases` (Chrome 140+). É o motor do Live Caption, não pesa na extensão (pacote de ~60 MB baixado pelo Chrome na tela de opções) e faz streaming com pontuação. Limitação: só o Chrome da Google recebe o pacote; no Chrome Linux do usuário `SpeechRecognition.available()` respondeu `unavailable`, então a captura cai automaticamente para o modelo local (o cabeçalho avisa "Chrome indisponível"). A frase de abertura desta seção ("a Web Speech API só escuta o microfone") deixou de valer no Chrome 133+.
 
+**v0.6.6:** o Whisper recebe **contexto por prompt** (`<|startofprev|>` + glossário + últimas 3 frases finais + tokens iniciais, via `decoder_input_ids`, até 96 tokens; o prefixo é removido do texto decodificado), então nomes do título e o assunto das frases anteriores guiam a transcrição. Moonshine não aceita prompt. Em modelos pesados (inferência de um final acima de 1 s) os parciais são pulados: no Whisper cada passe custa o encoder inteiro (janela fixa de 30 s), e um parcial atrasaria o final seguinte.
+
 | Opção | Download | WER médio | Streaming | Glossário |
 |---|---|---|---|---|
 | Moonshine tiny | 28 a 110 MB | ~12% | por trechos do VAD | não |

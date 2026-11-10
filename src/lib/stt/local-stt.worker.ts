@@ -30,6 +30,8 @@ export type WorkerInMessage =
       ortWasmPaths: { mjs: string; wasm: string };
     }
   | TranscribeRequest
+  /** Termos do glossário (nomes, siglas) para o prompt do Whisper. */
+  | { type: 'set-terms'; terms: string[] }
   | { type: 'dispose' };
 
 export type WorkerOutMessage =
@@ -42,6 +44,21 @@ const post = (msg: WorkerOutMessage) => self.postMessage(msg);
 
 let transcriber: AutomaticSpeechRecognitionPipeline | null = null;
 let generateOptions: Record<string, unknown> = {};
+/** Modelo Whisper: aceita prompt com o texto anterior (contexto) via decoder_input_ids. */
+let promptable = false;
+let multilingual = false;
+/** Ids dos tokens especiais que abrem a geração (sot, idioma, tarefa, sem timestamps). */
+let initTokenIds: number[] = [];
+let prevSotId: number | null = null;
+let terms: string[] = [];
+/** Últimas frases finais, usadas como contexto no prompt do Whisper. */
+const recentFinals: string[] = [];
+const RECENT_LIMIT = 3;
+/** Tamanho máximo do prompt em tokens (o Whisper aceita até 224). */
+const PROMPT_MAX_TOKENS = 96;
+/** Inferência de um final acima disso: os parciais são pulados (o modelo é pesado demais para dois passes). */
+const PARTIAL_SKIP_MS = 1000;
+let lastFinalInferenceMs = 0;
 let activeModel: string | null = null;
 let activeDevice: string | null = null;
 let initPromise: Promise<void> | null = null;
@@ -116,7 +133,10 @@ async function tryLoad(candidate: SttModelCandidate): Promise<AutomaticSpeechRec
   });
 
   // Whisper multilíngue: fixa inglês e transcrição (sem detecção de idioma por trecho).
-  generateOptions = candidate.multilingual ? { language: 'en', task: 'transcribe' } : {};
+  multilingual = !!candidate.multilingual;
+  generateOptions = multilingual ? { language: 'en', task: 'transcribe' } : {};
+  promptable = /whisper/i.test(candidate.modelId);
+  if (promptable) setupPrompt(pipe);
 
   // Aquecimento: a primeira inferência compila shaders / inicializa o runtime.
   const warmStart = performance.now();
@@ -139,6 +159,69 @@ async function init(candidate: SttModelCandidate, ortWasmPaths: { mjs: string; w
   }
 }
 
+interface TokenizerLike {
+  encode(text: string, opts?: { add_special_tokens?: boolean }): number[];
+  convert_tokens_to_ids(tokens: string[]): number[];
+}
+
+/** Descobre os ids dos tokens especiais do Whisper para montar o prompt. */
+function setupPrompt(pipe: AutomaticSpeechRecognitionPipeline): void {
+  const tok = (pipe as unknown as { tokenizer: TokenizerLike }).tokenizer;
+  const names = multilingual ? ['<|startoftranscript|>', '<|en|>', '<|transcribe|>', '<|notimestamps|>'] : ['<|startoftranscript|>', '<|notimestamps|>'];
+  const ids = tok.convert_tokens_to_ids(names);
+  const [prev] = tok.convert_tokens_to_ids(['<|startofprev|>']);
+  if (ids.some((id) => id === undefined || id === null) || prev === undefined || prev === null) {
+    console.warn('[stt-worker] tokens especiais do Whisper não encontrados; sem prompt de contexto');
+    promptable = false;
+    return;
+  }
+  initTokenIds = ids;
+  prevSotId = prev;
+}
+
+/** Texto do prompt: glossário + últimas frases (o Whisper o trata como transcrição anterior). */
+function promptText(): string {
+  const parts: string[] = [];
+  if (terms.length > 0) parts.push(`${terms.slice(0, 30).join(', ')}.`);
+  parts.push(...recentFinals);
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+/** decoder_input_ids = <|startofprev|> + prompt + tokens iniciais; null quando não há contexto. */
+function promptIds(): { ids: number[]; text: string } | null {
+  if (!promptable || prevSotId === null || !transcriber) return null;
+  const text = promptText();
+  if (!text) return null;
+  const tok = (transcriber as unknown as { tokenizer: TokenizerLike }).tokenizer;
+  let tokens = tok.encode(' ' + text, { add_special_tokens: false });
+  if (tokens.length > PROMPT_MAX_TOKENS) tokens = tokens.slice(tokens.length - PROMPT_MAX_TOKENS);
+  return { ids: [prevSotId, ...tokens, ...initTokenIds], text };
+}
+
+/** O texto decodificado inclui o prompt; remove esse prefixo. */
+function stripPrompt(text: string, prompt: string): string {
+  const t = text.trim();
+  const p = prompt.trim();
+  if (p && t.startsWith(p)) return t.slice(p.length).trim();
+  // Tokenização pode mudar espaços/pontuação: compara sem espaços.
+  const norm = (x: string) => x.replace(/\s+/g, '');
+  const np = norm(p);
+  if (np && norm(t).startsWith(np)) {
+    let seen = 0;
+    for (let i = 0; i < t.length; i++) {
+      if (!/\s/.test(t[i]!)) seen++;
+      if (seen === np.length) return t.slice(i + 1).trim();
+    }
+  }
+  return t;
+}
+
+function rememberFinal(text: string): void {
+  if (!text) return;
+  recentFinals.push(text);
+  while (recentFinals.length > RECENT_LIMIT) recentFinals.shift();
+}
+
 function enqueue(req: TranscribeRequest): void {
   if (req.isFinal) {
     closedSegments.add(req.segmentId);
@@ -149,7 +232,8 @@ function enqueue(req: TranscribeRequest): void {
     }
     finals.push(req);
   } else {
-    if (closedSegments.has(req.segmentId)) {
+    if (closedSegments.has(req.segmentId) || lastFinalInferenceMs > PARTIAL_SKIP_MS) {
+      // Trecho já fechado, ou modelo pesado: um parcial custaria tanto quanto um final.
       post({ type: 'dropped', id: req.id });
       return;
     }
@@ -193,9 +277,17 @@ async function transcribe(req: TranscribeRequest): Promise<void> {
   }
   const started = performance.now();
   try {
-    const output = await transcriber(req.audio, generateOptions as never);
-    const text = (Array.isArray(output) ? output.map((o) => o.text).join(' ') : output.text).trim();
-    post({ type: 'result', id: req.id, segmentId: req.segmentId, isFinal: req.isFinal, text, inferenceMs: performance.now() - started });
+    const prompt = promptIds();
+    const opts = prompt ? { ...generateOptions, decoder_input_ids: prompt.ids } : generateOptions;
+    const output = await transcriber(req.audio, opts as never);
+    let text = (Array.isArray(output) ? output.map((o) => o.text).join(' ') : output.text).trim();
+    if (prompt) text = stripPrompt(text, prompt.text);
+    const inferenceMs = performance.now() - started;
+    if (req.isFinal) {
+      lastFinalInferenceMs = inferenceMs;
+      rememberFinal(text);
+    }
+    post({ type: 'result', id: req.id, segmentId: req.segmentId, isFinal: req.isFinal, text, inferenceMs });
   } catch (err) {
     post({ type: 'error', id: req.id, message: err instanceof Error ? err.message : String(err) });
   }
@@ -209,6 +301,9 @@ self.onmessage = (event: MessageEvent<WorkerInMessage>) => {
       break;
     case 'transcribe':
       enqueue(msg);
+      break;
+    case 'set-terms':
+      terms = msg.terms;
       break;
     case 'dispose':
       void (async () => {

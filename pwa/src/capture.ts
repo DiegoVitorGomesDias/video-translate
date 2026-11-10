@@ -74,6 +74,7 @@ export class MicCapture {
   private onDeviceChange: (() => void) | null = null;
   private vad: SileroVad | null = null;
   private provider: SpeechProvider | null = null;
+  private terms: string[] = [];
   private partialTimer = 0;
   private wakeLock: { release(): Promise<void> } | null = null;
 
@@ -114,6 +115,7 @@ export class MicCapture {
     this.provider = provider;
     provider.onStatus = h.onStatus;
     provider.onResult = h.onResult;
+    if (this.terms.length > 0) provider.setPhrases?.(this.terms);
     vad.onLevel = (level, isSpeech) => h.onLevel?.(level, isSpeech);
 
     let ready = false;
@@ -152,6 +154,12 @@ export class MicCapture {
     } catch (err) {
       h.onError(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  /** Glossário para o prompt do modelo (Whisper); vale na captura em curso e nas próximas. */
+  setTerms(terms: string[]): void {
+    this.terms = terms;
+    this.provider?.setPhrases?.(terms);
   }
 
   /** Troca o microfone durante a captura (ou volta ao automático com ''). */

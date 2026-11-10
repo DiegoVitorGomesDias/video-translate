@@ -49,6 +49,9 @@ export function App() {
   const termsRef = useRef<string[]>([]);
   const vadEngineRef = useRef<VadEngine | null>(null);
   termsRef.current = terms;
+  useEffect(() => {
+    capture.current.setTerms(terms);
+  }, [terms]);
 
   useEffect(() => {
     document.documentElement.style.setProperty('--font-size', `${settings.fontSize}px`);
