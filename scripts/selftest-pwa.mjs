@@ -81,8 +81,9 @@ const deadline = Date.now() + 8 * 60 * 1000;
 while (Date.now() < deadline) {
   await sleep(2000);
   status = (await evaluate('document.querySelector(".header .grow")?.textContent ?? ""')) ?? '';
-  en = (await evaluate('document.querySelector(".card .en")?.textContent ?? ""')) ?? '';
-  pt = (await evaluate('[...document.querySelectorAll(".card .pt")].map(e => e.textContent).find(t => t && t !== "…" && !/baixando/.test(t)) ?? ""')) ?? '';
+  // Primeiro card com uma palavra de verdade (3+ letras) e tradução pronta.
+  const pair = await evaluate(`(() => { for (const c of document.querySelectorAll(".card")) { const e = c.querySelector(".en")?.textContent ?? ""; const p = c.querySelector(".pt")?.textContent ?? ""; if (/\\p{L}{3,}/u.test(e) && p && p !== "…" && !/baixando/.test(p)) return [e, p]; } return null; })()`);
+  if (pair) { en = pair[0]; pt = pair[1]; }
   if (en && pt) break;
   if (/^Erro/.test(status)) break;
 }
