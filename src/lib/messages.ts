@@ -24,15 +24,22 @@ export interface StartCaptureMessage {
   sttModel: SttModelId;
   sttEngine: SttEngineId;
   vadProfile: VadProfileId;
-  /** Título da aba no início (vira glossário para o reconhecimento do Chrome). */
-  tabTitle?: string;
+  /** Contexto inicial (o offscreen não acessa chrome.storage; o background manda). */
+  context?: SpeechContext;
 }
 
-/** O título da aba mudou; o offscreen refaz o glossário do reconhecimento do Chrome. */
-export interface SetTabTitleMessage {
+/** Fonte do glossário para o reconhecimento do Chrome: título da aba e opções. */
+export interface SpeechContext {
+  tabTitle: string;
+  useTabContext: boolean;
+  glossary: string;
+}
+
+/** Título da aba ou opções mudaram; o offscreen refaz o glossário do reconhecimento do Chrome. */
+export interface SetContextMessage {
   target: typeof OFFSCREEN_TARGET;
-  type: 'set-tab-title';
-  title: string;
+  type: 'set-context';
+  context: Partial<SpeechContext>;
 }
 
 export interface StopCaptureMessage {
@@ -46,7 +53,7 @@ export interface GetTranscriptsMessage {
   type: 'get-transcripts';
 }
 
-export type OffscreenMessage = StartCaptureMessage | StopCaptureMessage | GetTranscriptsMessage | SetTabTitleMessage;
+export type OffscreenMessage = StartCaptureMessage | StopCaptureMessage | GetTranscriptsMessage | SetContextMessage;
 
 export interface GetTranscriptsResponse {
   finals: TranscriptEvent[];

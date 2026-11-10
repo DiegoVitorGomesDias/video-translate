@@ -12,7 +12,7 @@ import {
   type DisplayMode,
   type OffscreenMessage,
 } from '@/lib/messages';
-import { loadOptions, saveOptions } from '@/lib/options';
+import { loadOptions, saveOptions, watchOptions } from '@/lib/options';
 
 const OFFSCREEN_URL = '/offscreen.html';
 const VIEWER_URL = '/viewer.html';
@@ -178,7 +178,7 @@ async function updateTabTitle(title: string, url: string): Promise<void> {
   if (state.tabTitle === title && (!url || state.tabUrl === url)) return;
   await setState({ ...state, tabTitle: title, tabUrl: url || state.tabUrl });
   if (await hasOffscreenDocument()) {
-    sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'set-tab-title', title }, 1).catch(() => undefined);
+    sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'set-context', context: { tabTitle: title } }, 1).catch(() => undefined);
   }
 }
 
@@ -204,7 +204,7 @@ async function startCapture(tab: chrome.tabs.Tab): Promise<void> {
       sttModel: options.sttModel,
       sttEngine: options.sttEngine,
       vadProfile: options.sentenceSplit,
-      tabTitle: tab.title ?? '',
+      context: { tabTitle: tab.title ?? '', useTabContext: options.useTabContext, glossary: options.glossary },
     });
     console.log(`[background] captura iniciada na aba ${tab.id} (${tab.title ?? ''})`);
   } catch (err) {
@@ -230,6 +230,15 @@ async function stopCapture(): Promise<void> {
 
 export default defineBackground(() => {
   console.log(`[background] video-translate v${browser.runtime.getManifest().version}`);
+
+  // Glossário das opções mudou durante a captura: repassa ao offscreen (que não lê o storage).
+  watchOptions((o) => {
+    void (async () => {
+      const state = await getState();
+      if (state.tabId === null || !(await hasOffscreenDocument())) return;
+      sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'set-context', context: { useTabContext: o.useTabContext, glossary: o.glossary } }, 1).catch(() => undefined);
+    })();
+  });
   browser.action.onClicked.addListener(async (tab) => {
     try {
       const state = await getState();

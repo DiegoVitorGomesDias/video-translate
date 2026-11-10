@@ -9,6 +9,7 @@ import {
   type BroadcastEvent,
   type GetTranscriptsResponse,
   type OffscreenMessage,
+  type SpeechContext,
   type SttEngineId,
   type SttModelId,
   type SttStatusEvent,
@@ -19,7 +20,6 @@ import { PCM_WORKLET_NAME, TARGET_SAMPLE_RATE } from '@/lib/audio/constants';
 import { SileroVad } from '@/lib/audio/silero-vad';
 import { VAD_PROFILES } from '@/lib/audio/vad';
 import { extractTermsFromTitle, mergeTerms, parseGlossary } from '@/lib/context';
-import { watchOptions, type Options } from '@/lib/options';
 import { ChromeSpeechProvider } from '@/lib/stt/chrome-speech';
 import { LocalTransformersProvider } from '@/lib/stt/local-transformers';
 import { candidatesFor } from '@/lib/stt/models';
@@ -41,9 +41,7 @@ interface CaptureSession {
   tabId: number;
   partialTimer: number;
   /** Atualiza o glossário do provedor (título da aba + opções). */
-  setTabTitle: (title: string) => void;
-  /** Para de observar as opções. */
-  unwatch: () => void;
+  setContext: (context: Partial<SpeechContext>) => void;
 }
 
 let session: CaptureSession | null = null;
@@ -128,7 +126,7 @@ function createProvider(model: SttModelId, engine: SttEngineId = 'local'): Speec
   return provider;
 }
 
-async function startCapture(streamId: string, tabId: number, model: SttModelId, engine: SttEngineId, profile: VadProfileId, tabTitle: string): Promise<void> {
+async function startCapture(streamId: string, tabId: number, model: SttModelId, engine: SttEngineId, profile: VadProfileId, initialContext: SpeechContext): Promise<void> {
   if (session) {
     log('já capturando; parando a sessão anterior');
     await stopCapture();
@@ -216,22 +214,18 @@ async function startCapture(streamId: string, tabId: number, model: SttModelId, 
 
   worklet.port.onmessage = (e: MessageEvent<Float32Array>) => vad.push(e.data);
 
-  // Glossário (título da aba + opções) para o reconhecimento do Chrome.
-  let currentTitle = tabTitle;
-  let currentOptions: Options | null = null;
+  // Glossário (título da aba + opções) para o reconhecimento do Chrome. O offscreen não
+  // tem chrome.storage, então o background manda o contexto no início e a cada mudança.
+  let context: SpeechContext = { ...initialContext };
   const applyPhrases = () => {
     if (!provider.setPhrases) return;
-    const auto = currentOptions?.useTabContext === false ? [] : extractTermsFromTitle(currentTitle);
-    const terms = mergeTerms(parseGlossary(currentOptions?.glossary ?? ''), auto);
+    const auto = context.useTabContext ? extractTermsFromTitle(context.tabTitle) : [];
+    const terms = mergeTerms(parseGlossary(context.glossary), auto);
     provider.setPhrases(terms);
     log(`glossário do reconhecimento: ${terms.join(', ') || '(vazio)'}`);
   };
-  const unwatchOptions = watchOptions((o) => {
-    currentOptions = o;
-    applyPhrases();
-  });
-  const setTabTitle = (title: string) => {
-    currentTitle = title;
+  const setContext = (patch: Partial<SpeechContext>) => {
+    context = { ...context, ...patch };
     applyPhrases();
   };
 
@@ -242,7 +236,7 @@ async function startCapture(streamId: string, tabId: number, model: SttModelId, 
     void stopCapture();
   });
 
-  session = { stream, ctx, source, worklet, vad, provider, tabId, partialTimer, setTabTitle, unwatch: unwatchOptions };
+  session = { stream, ctx, source, worklet, vad, provider, tabId, partialTimer, setContext };
 
   if (ctx.state === 'suspended') await ctx.resume();
   log(`áudio ligado: contexto a ${ctx.sampleRate} Hz, som da aba restaurado`);
@@ -288,7 +282,6 @@ async function stopCapture(): Promise<void> {
   session = null;
   log('parando captura');
   window.clearInterval(s.partialTimer);
-  s.unwatch();
   s.worklet.port.onmessage = null;
   // O provedor vai ser encerrado já; um último trecho não teria tempo de ser transcrito.
   s.vad.onSegment = null;
@@ -307,10 +300,10 @@ browser.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
   const run = async (): Promise<unknown> => {
     switch (m.type) {
       case 'start-capture':
-        await startCapture(m.streamId, m.tabId, m.sttModel, m.sttEngine ?? 'local', m.vadProfile ?? 'normal', m.tabTitle ?? '');
+        await startCapture(m.streamId, m.tabId, m.sttModel, m.sttEngine ?? 'local', m.vadProfile ?? 'normal', m.context ?? { tabTitle: '', useTabContext: true, glossary: '' });
         return { ok: true };
-      case 'set-tab-title':
-        session?.setTabTitle(m.title);
+      case 'set-context':
+        session?.setContext(m.context);
         return { ok: true };
       case 'stop-capture':
         await stopCapture();
