@@ -107,6 +107,8 @@ Como funciona o modo local:
 
 **Decisão:** **LibreTranslate como padrão**, com a URL da instância (e chave opcional) configurável na tela de opções. Se a instância não responder ou não estiver configurada, a extensão cai automaticamente para a **Translator API do Chrome**, que roda local e sem chave. Tudo atrás de uma interface `TranslationProvider`.
 
+**Atualização (09/11/2026):** a Translator API do Chrome falhou com `NotSupportedError` para EN→PT no Chrome do usuário (Linux), então entrou um terceiro nível, configurável nas opções: **tradução local no navegador** com `Xenova/opus-mt-en-ROMANCE` via transformers.js (~113 MB, padrão; WebGPU com fallback para WASM), **Google Tradutor** por endpoint público não oficial (opcional, envia o texto para fora) ou **nenhum**. Ordem final: LibreTranslate → Chrome → fallback escolhido.
+
 Para desenvolvimento e uso local, a instância sobe com um comando:
 
 ```bash
@@ -189,3 +191,4 @@ Preparar para a Chrome Web Store (ícones, descrição, política de privacidade
 3. Interface: janela separada (popup).
 4. Uso local, mas estruturado desde o começo para publicação na Chrome Web Store.
 5. UI em React.
+6. (09/11/2026) Último recurso de tradução: modelo local no navegador (opus-mt) por padrão; Google não oficial só se o usuário escolher.

@@ -23,8 +23,8 @@ Ordem, a cada abertura da janela (o cabeçalho mostra qual ficou ativo e, no too
 1. **LibreTranslate**, se houver URL nas opções (padrão `http://localhost:5000`) e a instância responder em `/languages`.
 2. **Translator API do Chrome** (138+, local, sem chave), se o pacote EN→PT já estiver instalado e o tradutor for criado. Tenta os códigos `pt`, `pt-BR` e `pt-PT`. Se o pacote só precisar ser baixado, a janela mostra "Baixar agora".
 3. **Fallback 2**, escolhido nas opções:
-   - **Google Tradutor** (padrão): endpoint público não oficial, sem chave, instantâneo. O texto das frases vai para o Google e não há garantia de disponibilidade.
-   - **Tradução local no navegador**: `Xenova/opus-mt-en-ROMANCE` via transformers.js (~113 MB em q8, baixado uma vez, offline depois). Mais lenta (WASM) e qualidade um pouco menor.
+   - **Tradução local no navegador** (padrão): `Xenova/opus-mt-en-ROMANCE` via transformers.js (~113 MB em q8, baixado uma vez, offline depois). Tenta WebGPU e cai para WASM. Enquanto baixa, os cards mostram "baixando tradutor local X%".
+   - **Google Tradutor**: endpoint público não oficial, sem chave, instantâneo. O texto das frases vai para o Google e não há garantia de disponibilidade.
    - **Nenhum**: só o inglês.
 
 **LibreTranslate local** (melhor controle; nada sai do computador):

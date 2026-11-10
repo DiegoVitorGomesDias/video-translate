@@ -137,10 +137,15 @@ export function App() {
         </p>
         <label htmlFor="fallback">Fallback 2 (quando os dois acima falham)</label>
         <select id="fallback" value={opts.translationFallback} onChange={(e) => update('translationFallback', e.target.value as Options['translationFallback'])}>
-          <option value="google">Google Tradutor (endpoint público não oficial, sem chave; o texto vai para o Google)</option>
-          <option value="local">Tradução local no navegador (opus-mt en→pt, ~{LOCAL_MT_DOWNLOAD_MB} MB, offline, mais lenta)</option>
+          <option value="local">Tradução local no navegador (padrão; opus-mt en→pt, ~{LOCAL_MT_DOWNLOAD_MB} MB uma vez, offline)</option>
+          <option value="google">Google Tradutor (endpoint público não oficial; envia o texto das frases para fora)</option>
           <option value="none">Nenhum (mostrar só o inglês)</option>
         </select>
+        {opts.translationFallback === 'google' && (
+          <p className="hint" style={{ color: 'var(--danger)' }}>
+            Atenção: o texto de cada frase é enviado ao Google por um endpoint não oficial, sem garantia de disponibilidade.
+          </p>
+        )}
         <div className="row">
           <button id="test-fallback" onClick={() => void testFallback()} disabled={opts.translationFallback === 'none' || fallbackTest === 'testando…'}>
             Testar fallback 2

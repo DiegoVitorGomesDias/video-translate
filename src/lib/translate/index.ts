@@ -94,7 +94,7 @@ export async function createTranslator(opts: CreateTranslatorOptions): Promise<T
     chromeError = hasApi ? `Translator API presente, mas sem suporte a ${from}→${to} neste navegador` : 'Translator API ausente (Chrome 138+ desktop)';
   }
 
-  const fallback = opts.fallback ?? 'google';
+  const fallback = opts.fallback ?? 'local';
   if (fallback === 'local' && opts.resolveUrl) {
     const local = new LocalOpusProvider(opts.resolveUrl);
     return { provider: new CachedTranslationProvider(local), kind: 'local', libreError, chromeAvailability, chromeError, chrome, local };

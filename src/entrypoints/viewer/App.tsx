@@ -323,7 +323,12 @@ export function App() {
                   tradução falhou: {c.ptError}
                 </div>
               ) : (
-                <div className={`pt ${c.pt === undefined ? 'pending' : ''}`}>{c.pt ?? '…'}</div>
+                <div className={`pt ${c.pt === undefined ? 'pending' : ''}`}>
+                  {c.pt ??
+                    (translator.kind === 'local' && localStatus?.state === 'loading'
+                      ? `baixando tradutor local${localStatus.progress !== undefined ? ` ${localStatus.progress.toFixed(0)}%` : '…'}`
+                      : '…')}
+                </div>
               )
             ) : null}
           </article>

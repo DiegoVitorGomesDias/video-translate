@@ -18,7 +18,7 @@ export const DEFAULT_OPTIONS: Options = {
   libreUrl: 'http://localhost:5000',
   libreApiKey: '',
   sttModel: DEFAULT_STT_MODEL,
-  translationFallback: 'google',
+  translationFallback: 'local',
   fontSize: 18,
 };
 
