@@ -155,7 +155,7 @@ class CaptureService : Service() {
                 }
             }
             // 6. Consumidor: finais têm prioridade sobre parciais.
-            while (isActive) {
+            while (scope.isActive) {
                 val seg = finals.tryReceive().getOrNull()
                 if (seg != null) { handleFinal(seg); continue }
                 val partial = partials.tryReceive().getOrNull()
