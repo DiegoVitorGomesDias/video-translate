@@ -1,0 +1,59 @@
+# Compila o app Android (android/), roda os testes unitários e publica o APK de debug:
+# como artifact em todo push/PR que toque android/, e no release "android-latest" em push na main.
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+    paths: ['android/**', '.github/workflows/android.yml']
+  pull_request:
+    paths: ['android/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+          cache-read-only: false
+      - name: Testes unitários
+        run: gradle --no-daemon testDebugUnitTest
+      - name: APK de debug
+        run: gradle --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video-translate-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Relatório de testes (se falhar)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: android/app/build/reports
+      - name: Release android-latest
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          name: Android APK (última versão)
+          body: |
+            APK de debug do app Android, gerado automaticamente a partir da `main`.
+            Instale no celular (permitir "fontes desconhecidas"). Veja o README, seção "Android (APK)".
+          prerelease: true
+          files: android/app/build/outputs/apk/debug/app-debug.apk

@@ -147,6 +147,20 @@ Limitações: a qualidade cai com ruído do ambiente e distância do alto-falant
 
 Desenvolvimento: `pnpm pwa:dev` (servidor local), `pnpm pwa:build` (gera `pwa/dist`), `pnpm pwa:compile` (tsc). O build é publicado automaticamente pelo workflow `.github/workflows/pages.yml` a cada push na `main`; para isso, **ative uma vez** em GitHub → Settings → Pages → Source: "GitHub Actions". Autoteste com microfone falso (um WAV de fala em inglês): `node scripts/selftest-pwa.mjs /caminho/para/chrome`.
 
+## Android (APK)
+
+Para usar **com fone de ouvido** no celular (Bluetooth ou com fio), há um app Android nativo em `android/` (Kotlin + Jetpack Compose, Android 10+). Ele captura o **áudio que o próprio aparelho está tocando** (AudioPlaybackCapture via MediaProjection), então funciona com o YouTube, com vídeos no Chrome e com qualquer app que não bloqueie a captura, e mostra as legendas num **painel flutuante** por cima do vídeo. Transcrição (sherpa-onnx + Moonshine) e tradução (ML Kit) rodam no aparelho; nada sai do celular.
+
+**Instalar**: baixe `app-debug.apk` no release [android-latest](https://github.com/DiegoVitorGomesDias/video-translate/releases/tag/android-latest) pelo navegador do celular (o repositório é privado: é preciso estar logado no GitHub no celular), abra o arquivo e permita "instalar apps de fontes desconhecidas" para o navegador. O APK é gerado pelo workflow `.github/workflows/android.yml` a cada push que mexa em `android/`.
+
+**Permissões pedidas e por quê**: *Microfone/áudio* (o Android exige RECORD_AUDIO para a captura interna e para o modo microfone), *captura de tela* (o diálogo do sistema "começar a gravar ou transmitir" é como o Android autoriza a captura do áudio interno; o app não grava a tela), *notificações* (o serviço em primeiro plano mostra uma notificação com Parar), *sobrepor a outros apps* (painel flutuante com as legendas).
+
+**Como usar**: Iniciar → autorizar → abrir o YouTube (ou o Chrome) e dar play. O painel flutuante mostra as últimas 2 ou 3 frases EN + PT (arraste pela barra, redimensione pela alça, recolha com `–`, pare com `✕`). Na primeira vez o app baixa o modelo de voz (~108 MB) e o de tradução (~30 MB).
+
+**Limitações**: apps com proteção de conteúdo (Prime Video, Netflix e similares) bloqueiam a captura e saem mudos; para eles não há saída no celular além do modo microfone sem fone. O app do YouTube precisa ser testado no seu aparelho; se bloquear, assista ao YouTube pelo Chrome do celular, cujo áudio é capturável. iPhone não tem equivalente (o iOS não permite capturar o áudio de outros apps).
+
+Desenvolvimento: projeto Gradle independente em `android/` (sem Android SDK local nesta máquina; o CI compila). Testes unitários do segmentador de frases (porte do TS) em `android/app/src/test`.
+
 ## Estrutura
 
 ```
@@ -155,7 +169,9 @@ video-translate/
 ├── pwa/                          # versão web para celular (Vite + React + vite-plugin-pwa), reusa src/lib
 │   ├── vite.config.ts, index.html
 │   └── src/ App.tsx, capture.ts (microfone → worklet → VAD → STT), Settings.tsx, settings.ts
+├── android/                      # app Android nativo (captura do áudio interno + overlay), Kotlin
 ├── .github/workflows/pages.yml   # publica pwa/dist no GitHub Pages
+├── .github/workflows/android.yml # compila o APK e publica no release android-latest
 ├── scripts/selftest-pwa.mjs      # autoteste do PWA com microfone falso
 ├── scripts/copy-ort.mjs          # copia o runtime ONNX para public/onnx
 ├── scripts/selftest-chrome.mjs   # autoteste em Chrome headless (modelo + páginas)

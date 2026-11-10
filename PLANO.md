@@ -173,6 +173,9 @@ A pedido do usuário, o viewer passou a abrir como painel lateral (drawer) dentr
 **Fase 1c: PWA móvel** ✅ 10/11/2026
 Pedido do usuário: usar em celular e tablet. Como extensões não existem no Chrome móvel, foi feito um app web instalável (`pwa/`, Vite + React + vite-plugin-pwa) que reaproveita `src/lib` (VAD, STT local, segmentador, tradutores) e captura pelo **microfone** (echoCancellation off, noiseSuppression/autoGainControl on), com Wake Lock, tema, fonte, configurações em localStorage e cache offline do app, do runtime ONNX e dos modelos. Publicado em GitHub Pages por GitHub Actions. A extensão exporta as configurações por QR code (`#import=` na URL do app), que o app confirma antes de importar. Teste automático com microfone falso (WAV de fala).
 
+**Fase 1d: app Android** 🚧 iniciado em 10/11/2026
+Decisão do usuário para o caso "celular com fone de ouvido no YouTube": app Android nativo (`android/`, Kotlin + Compose, Android 10+) que captura o áudio interno do aparelho (MediaProjection + AudioPlaybackCapture) num serviço em primeiro plano, transcreve com sherpa-onnx (Moonshine tiny int8, download no primeiro uso), separa frases com o mesmo segmentador (portado para Kotlin com os mesmos testes), traduz com ML Kit offline (ou LibreTranslate por URL) e mostra as legendas num painel flutuante sobre o YouTube. APK compilado no GitHub Actions e publicado no release `android-latest`. Limitação: apps com DRM (Prime, Netflix) saem mudos; iPhone não tem equivalente.
+
 **Fase 2: seleção do vídeo**
 Overlay para escolher o vídeo, pausa/retomada seguindo o vídeo, título do vídeo na janela, tentativa de `captureStream()` para isolar o áudio.
 
@@ -199,3 +202,4 @@ Preparar para a Chrome Web Store (ícones, descrição, política de privacidade
 5. UI em React.
 6. (09/11/2026) Último recurso de tradução: modelo local no navegador (opus-mt) por padrão; Google não oficial só se o usuário escolher.
 7. (10/11/2026) Celular/tablet: app web (PWA) por microfone, publicado em GitHub Pages, com exportação das configurações da extensão por QR.
+8. (10/11/2026) Fone de ouvido no celular: app Android nativo com captura do áudio interno (opção 1 escolhida pelo usuário); player dentro do PWA descartado.

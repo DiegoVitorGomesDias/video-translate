@@ -11,3 +11,7 @@ stats-*.json
 public/onnx/
 pwa/public/onnx/
 pwa/dist/
+android/app/libs/
+android/.gradle/
+android/**/build/
+android/local.properties

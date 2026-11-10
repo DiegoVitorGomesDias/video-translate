@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Video Translate</string>
+    <string name="notification_channel">Captura de áudio</string>
+    <string name="notification_title">Video Translate está ouvindo</string>
+    <string name="notification_text">Transcrevendo o áudio do aparelho. Toque para abrir.</string>
+    <string name="action_stop">Parar</string>
+</resources>
