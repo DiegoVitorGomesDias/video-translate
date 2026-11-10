@@ -2,7 +2,7 @@
   "name": "video-translate",
   "description": "Extensão Chrome que transcreve o áudio de um vídeo em inglês e traduz para português em tempo real.",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "scripts": {
     "dev": "wxt",

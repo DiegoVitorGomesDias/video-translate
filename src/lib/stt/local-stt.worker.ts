@@ -68,15 +68,26 @@ async function tryLoad(candidate: SttModelCandidate): Promise<AutomaticSpeechRec
   const label = `${candidate.modelId} (${candidate.device})`;
   post({ type: 'status', state: 'loading', message: `Carregando ${label}`, progress: 0, model: candidate.modelId, device: candidate.device });
   const started = performance.now();
+  const files = new Map<string, { loaded: number; total: number }>();
 
   const pipe = await pipeline('automatic-speech-recognition', candidate.modelId, {
     device: candidate.device,
     dtype: candidate.dtype as never,
     progress_callback: (info: unknown) => {
-      const p = info as { status?: string; progress?: number; file?: string };
-      if (p.status === 'progress' && typeof p.progress === 'number') {
-        post({ type: 'status', state: 'loading', message: `Baixando ${p.file ?? ''}`, progress: p.progress, model: candidate.modelId, device: candidate.device });
+      const p = info as { status?: string; progress?: number; file?: string; loaded?: number; total?: number };
+      if (!p.file) return;
+      // Progresso agregado de todos os arquivos (encoder, decoder, tokenizer...), em bytes.
+      if (p.status === 'progress' && typeof p.loaded === 'number' && typeof p.total === 'number') files.set(p.file, { loaded: p.loaded, total: p.total });
+      else if (p.status === 'done' && files.has(p.file)) files.set(p.file, { loaded: files.get(p.file)!.total, total: files.get(p.file)!.total });
+      else return;
+      let loaded = 0;
+      let total = 0;
+      for (const f of files.values()) {
+        loaded += f.loaded;
+        total += f.total;
       }
+      const progress = total > 0 ? (loaded / total) * 100 : (p.progress ?? 0);
+      post({ type: 'status', state: 'loading', message: `Baixando ${p.file} (${(loaded / 1048576).toFixed(0)} de ${(total / 1048576).toFixed(0)} MB)`, progress, model: candidate.modelId, device: candidate.device });
     },
   });
 

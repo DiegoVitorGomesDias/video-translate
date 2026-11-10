@@ -50,8 +50,11 @@ body { background: var(--bg); color: var(--fg); }
 .config-line { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; cursor: pointer; }
 .chip { font-size: 11px; color: var(--muted); background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
 .chip.warn { color: var(--warn); border-color: var(--warn); }
-.progress { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; margin-top: 6px; }
+.progress-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--muted); }
+.progress-label { white-space: nowrap; }
+.progress { flex: 1; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
 .progress > div { height: 100%; background: var(--warn); transition: width .2s; }
+.progress-pct { min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
 
 button {
   font: inherit; font-size: 12.5px; padding: 4px 10px; border-radius: 6px; cursor: pointer;

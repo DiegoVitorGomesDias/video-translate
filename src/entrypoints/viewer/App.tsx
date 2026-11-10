@@ -380,20 +380,10 @@ export function App() {
             </button>
           )}
         </div>
-        {stt?.state === 'loading' && stt.progress !== undefined && (
-          <div className="progress">
-            <div style={{ width: `${Math.min(100, stt.progress)}%` }} />
-          </div>
-        )}
-        {chromeDownload !== null && (
-          <div className="progress">
-            <div style={{ width: `${Math.round(chromeDownload * 100)}%` }} />
-          </div>
-        )}
+        {stt?.state === 'loading' && stt.progress !== undefined && <ProgressBar value={stt.progress} label="modelo" title={stt.message} />}
+        {chromeDownload !== null && <ProgressBar value={chromeDownload * 100} label="tradutor do Chrome" />}
         {translator?.kind === 'local' && localStatus?.state === 'loading' && localStatus.progress !== undefined && (
-          <div className="progress">
-            <div style={{ width: `${Math.min(100, localStatus.progress)}%` }} />
-          </div>
+          <ProgressBar value={localStatus.progress} label="tradutor local" title={localStatus.message} />
         )}
       </header>
 
@@ -475,6 +465,20 @@ function describeStatus(
   if (stt.device === 'chrome') return { kind: 'listening', text: 'Ouvindo · Chrome no dispositivo', detail: stt.message };
   const device = stt.device === 'webgpu' ? 'GPU' : 'CPU';
   return { kind: 'listening', text: `Ouvindo · ${modelShortName(stt.model ?? '')} (${device})`, detail: stt.message };
+}
+
+/** Barra de progresso com a porcentagem ao lado. */
+function ProgressBar({ value, label, title }: { value: number; label: string; title?: string }) {
+  const pct = Math.max(0, Math.min(100, value));
+  return (
+    <div className="progress-row" title={title ?? ''}>
+      <span className="progress-label">{label}</span>
+      <div className="progress">
+        <div style={{ width: `${pct}%` }} />
+      </div>
+      <span className="progress-pct">{pct.toFixed(0)}%</span>
+    </div>
+  );
 }
 
 function modelShortName(hfId: string): string {

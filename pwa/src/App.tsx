@@ -250,8 +250,12 @@ export function App() {
           )}
         </div>
         {running && stt?.state === 'loading' && stt.progress !== undefined && (
-          <div className="progress">
-            <div style={{ width: `${Math.min(100, stt.progress)}%` }} />
+          <div className="progress-row" title={stt.message ?? ''}>
+            <span className="progress-label">modelo</span>
+            <div className="progress">
+              <div style={{ width: `${Math.max(0, Math.min(100, stt.progress))}%` }} />
+            </div>
+            <span className="progress-pct">{Math.max(0, Math.min(100, stt.progress)).toFixed(0)}%</span>
           </div>
         )}
         {running && stt?.state === 'ready' && (
