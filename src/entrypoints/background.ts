@@ -165,10 +165,23 @@ async function focusViewer(state: CaptureState): Promise<void> {
 async function switchDisplay(mode: DisplayMode): Promise<void> {
   const state = await getState();
   if (state.tabId === null) return;
-  await hideViewer(state);
-  await showViewer({ ...state, windowId: null }, mode);
+  if (state.mode === mode) {
+    await focusViewer(state);
+    return;
+  }
+  // Solta a referência da janela antes de fechá-la: senão windows.onRemoved acha que o
+  // usuário fechou o viewer e encerra a captura inteira (era o que acontecia ao
+  // "voltar para o painel"). Abre a superfície nova antes de fechar a antiga, para
+  // não ficar sem viewer se a nova falhar.
+  const prevWindowId = state.windowId ?? null;
+  const cleared: CaptureState = { ...state, windowId: null };
+  await setState(cleared);
+  const next = await showViewer(cleared, mode);
+  console.log(`[background] viewer trocado de ${state.mode ?? '?'} para ${next.mode}`);
+  if (next.mode !== 'drawer' && state.mode === 'drawer') await closeDrawer(state.tabId);
+  if (prevWindowId != null && prevWindowId !== next.windowId) await browser.windows.remove(prevWindowId).catch(() => undefined);
   const options = await loadOptions();
-  await saveOptions({ ...options, displayMode: mode });
+  await saveOptions({ ...options, displayMode: next.mode ?? mode });
 }
 
 /** Título/URL da aba capturada mudaram (o viewer usa o título como contexto da tradução). */
@@ -254,7 +267,7 @@ export default defineBackground(() => {
     }
   });
 
-  browser.runtime.onMessage.addListener((msg: unknown) => {
+  browser.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
     if (isBackgroundMessage(msg)) {
       switch (msg.type) {
         case 'stop-capture-request':
@@ -262,8 +275,14 @@ export default defineBackground(() => {
           void stopCapture();
           break;
         case 'switch-display':
-          void switchDisplay(msg.mode);
-          break;
+          switchDisplay(msg.mode).then(
+            () => sendResponse({ ok: true }),
+            (err) => {
+              console.error('[background] falha ao trocar o viewer:', err);
+              sendResponse({ ok: false, error: String(err) });
+            },
+          );
+          return true; // resposta assíncrona
         case 'tab-title':
           void updateTabTitle(msg.title, msg.url);
           break;

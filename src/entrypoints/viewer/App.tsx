@@ -227,7 +227,10 @@ export function App() {
   const switchDisplay = () => {
     void browser.runtime
       .sendMessage({ target: BACKGROUND_TARGET, type: 'switch-display', mode: DISPLAY_MODE === 'drawer' ? 'window' : 'drawer' })
-      .catch(() => undefined);
+      .then((res: { ok?: boolean; error?: string } | undefined) => {
+        if (res && res.ok === false) console.error('[viewer] não foi possível trocar o modo:', res.error);
+      })
+      .catch((err) => console.error('[viewer] não foi possível trocar o modo:', err));
   };
   /** Refaz a tradução dos cards que contêm o termo (a proteção/remoção passa a valer neles). */
   const retranslateWith = (term: string) => {

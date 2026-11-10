@@ -42,15 +42,21 @@ export default defineContentScript({
       :host { all: initial; }
       .panel {
         position: fixed; top: 0; right: 0; height: 100vh; width: ${width}px;
-        z-index: 2147483647; display: flex; flex-direction: row;
+        z-index: 2147483646; display: flex; flex-direction: row;
         background: #15171b; box-shadow: -4px 0 16px rgba(0,0,0,.35);
         font-family: system-ui, sans-serif; transition: transform .2s ease;
       }
       .panel.collapsed { transform: translateX(100%); box-shadow: none; }
       .handle {
-        width: 6px; cursor: ew-resize; background: transparent; flex: none;
+        position: relative; width: 6px; cursor: ew-resize; background: transparent; flex: none;
+        touch-action: none; user-select: none;
       }
+      /* Área de pegada maior que a linha visível (6px é difícil de acertar). */
+      .handle::before { content: ''; position: absolute; top: 0; bottom: 0; left: -6px; right: -4px; }
       .handle:hover, .handle.dragging { background: rgba(63,193,169,.5); }
+      /* Durante o arrasto o iframe não pode receber o ponteiro (senão os eventos somem). */
+      .panel.resizing .frame { pointer-events: none; }
+      .panel.resizing { transition: none; }
       .frame { flex: 1; border: 0; width: 100%; height: 100%; background: #15171b; color-scheme: light dark; }
       .bar {
         position: absolute; top: 8px; right: 100%; display: flex; flex-direction: column; gap: 6px;
@@ -70,7 +76,7 @@ export default defineContentScript({
         letter-spacing: .3px;
       }
       .tab.visible { display: block; }
-      .overlay { position: fixed; inset: 0; z-index: 2147483646; display: none; cursor: ew-resize; }
+      .overlay { position: fixed; inset: 0; z-index: 2147483647; display: none; cursor: ew-resize; user-select: none; }
       .overlay.visible { display: block; }
     `;
 
@@ -109,26 +115,30 @@ export default defineContentScript({
     document.documentElement.appendChild(host);
 
     // ---- Redimensionar arrastando a borda esquerda ----
+    // Usa Pointer Events com captura no handle: o ponteiro continua entregue ao handle
+    // mesmo quando passa por cima do iframe do viewer ou sai da janela. Antes, com
+    // mousemove/mouseup na window, o iframe engolia os eventos e o arrasto "travava".
     let dragging = false;
+    let pointerId: number | null = null;
     let startX = 0;
     let startWidth = width;
-    handle.addEventListener('mousedown', (e) => {
-      dragging = true;
-      startX = e.clientX;
-      startWidth = width;
-      handle.classList.add('dragging');
-      overlay.classList.add('visible'); // captura o mouse sobre o iframe
-      e.preventDefault();
-    });
-    const onMove = (e: MouseEvent) => {
-      if (!dragging) return;
-      width = Math.min(window.innerWidth - 80, Math.max(MIN_WIDTH, startWidth + (startX - e.clientX)));
+    const applyWidth = (w: number) => {
+      width = Math.round(Math.min(window.innerWidth - 80, Math.max(MIN_WIDTH, w)));
       panel.style.width = `${width}px`;
     };
-    const onUp = () => {
+    const endDrag = () => {
       if (!dragging) return;
       dragging = false;
+      if (pointerId !== null) {
+        try {
+          handle.releasePointerCapture(pointerId);
+        } catch {
+          /* já liberado */
+        }
+      }
+      pointerId = null;
       handle.classList.remove('dragging');
+      panel.classList.remove('resizing');
       overlay.classList.remove('visible');
       try {
         localStorage.setItem(WIDTH_KEY, String(width));
@@ -136,8 +146,40 @@ export default defineContentScript({
         /* ignora */
       }
     };
-    window.addEventListener('mousemove', onMove, true);
-    window.addEventListener('mouseup', onUp, true);
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || dragging) return;
+      dragging = true;
+      pointerId = e.pointerId;
+      startX = e.clientX;
+      startWidth = width;
+      handle.classList.add('dragging');
+      panel.classList.add('resizing'); // iframe deixa de receber o ponteiro
+      overlay.classList.add('visible'); // cursor e bloqueio da página durante o arrasto
+      try {
+        handle.setPointerCapture(e.pointerId);
+      } catch {
+        /* sem captura: os listeners na window abaixo ainda cobrem o caso */
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    const onMove = (e: PointerEvent) => {
+      if (!dragging || (pointerId !== null && e.pointerId !== pointerId)) return;
+      applyWidth(startWidth + (startX - e.clientX));
+      e.preventDefault();
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', endDrag);
+    handle.addEventListener('pointercancel', endDrag);
+    handle.addEventListener('lostpointercapture', endDrag);
+    // Reserva caso a captura do ponteiro não esteja disponível.
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', endDrag, true);
+    window.addEventListener('blur', endDrag);
+    const onResize = () => {
+      if (width > window.innerWidth - 80) applyWidth(width);
+    };
+    window.addEventListener('resize', onResize);
 
     // ---- Recolher / reabrir / fechar ----
     const collapse = () => {
@@ -172,8 +214,11 @@ export default defineContentScript({
     sendTitle();
 
     const remove = () => {
-      window.removeEventListener('mousemove', onMove, true);
-      window.removeEventListener('mouseup', onUp, true);
+      endDrag();
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', endDrag, true);
+      window.removeEventListener('blur', endDrag);
+      window.removeEventListener('resize', onResize);
       browser.runtime.onMessage.removeListener(onMessage);
       titleObserver.disconnect();
       window.clearInterval(titleTimer);
