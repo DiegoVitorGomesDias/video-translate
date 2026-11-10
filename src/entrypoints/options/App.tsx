@@ -78,18 +78,24 @@ export function App() {
     setFallbackTest('testando…');
     const t0 = performance.now();
     try {
-      let sample: string;
+      const samples = ['This is amazing!', "Let's continue our project next Monday.", 'She brought cases before, but he never made her run the test.'];
+      let provider: LocalOpusProvider | GoogleFreeProvider;
       if (opts.translationFallback === 'local') {
         const local = new LocalOpusProvider((p) => browser.runtime.getURL(p as never));
         local.onStatus = (st) => {
           if (st.state === 'loading') setFallbackTest(`baixando/carregando modelo… ${st.progress !== undefined ? `${st.progress.toFixed(0)}%` : ''}`);
         };
-        sample = await local.translate('This is amazing!', 'en', 'pt');
-        local.dispose();
+        await local.start();
+        provider = local;
       } else {
-        sample = await new GoogleFreeProvider().translate('This is amazing!', 'en', 'pt');
+        provider = new GoogleFreeProvider();
       }
-      setFallbackTest(`OK em ${((performance.now() - t0) / 1000).toFixed(1)} s: "This is amazing!" → "${sample}"`);
+      const t1 = performance.now();
+      const results: string[] = [];
+      for (const en of samples) results.push(`"${en}" → "${await provider.translate(en, 'en', 'pt')}"`);
+      const perSentence = ((performance.now() - t1) / samples.length / 1000).toFixed(1);
+      if (provider instanceof LocalOpusProvider) provider.dispose();
+      setFallbackTest(`OK em ${((performance.now() - t0) / 1000).toFixed(1)} s (${perSentence} s por frase): ${results.join(' | ')}`);
     } catch (err) {
       setFallbackTest(`Falhou: ${err instanceof Error ? err.message : String(err)}`);
     }

@@ -146,7 +146,8 @@ for (const choice of ['google', 'local']) {
     if (/^(OK|Falhou)/.test(result)) break;
   }
   console.log(`[translate:${choice}]`, result || 'TIMEOUT');
-  if (!/^OK/.test(result)) mtOk = false;
+  const good = /^OK/.test(result) && /incr[íi]vel/i.test(result) && /segunda/i.test(result) && !/<</.test(result) && !/\b(el|les|est|une)\b/.test(result.replace(/"[^"]*" →/g, ''));
+  if (!good) { mtOk = false; console.log(`[translate:${choice}] FALHOU na validação`); }
   w.close();
   await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`).catch(() => {});
 }
