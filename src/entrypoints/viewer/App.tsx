@@ -23,6 +23,7 @@ interface Card extends Sentence {
 type CaptureStatus = 'starting' | 'listening' | 'stopped' | 'error';
 
 const VERSION = browser.runtime.getManifest().version;
+const DISPLAY_MODE: 'drawer' | 'window' = new URLSearchParams(location.search).get('mode') === 'drawer' ? 'drawer' : 'window';
 const FROM = 'en';
 const TO = 'pt';
 
@@ -202,6 +203,11 @@ export function App() {
     void browser.runtime.sendMessage({ target: BACKGROUND_TARGET, type: 'stop-capture-request' }).catch(() => undefined);
   };
   const openOptions = () => void browser.runtime.openOptionsPage();
+  const switchDisplay = () => {
+    void browser.runtime
+      .sendMessage({ target: BACKGROUND_TARGET, type: 'switch-display', mode: DISPLAY_MODE === 'drawer' ? 'window' : 'drawer' })
+      .catch(() => undefined);
+  };
   const prepareChrome = () => {
     const chrome = translator?.chrome;
     if (!chrome) return;
@@ -262,6 +268,9 @@ export function App() {
           </span>
           <button className="link" onClick={openOptions} title={translatorDetail || translatorLabel}>
             {translatorLabel}
+          </button>
+          <button className="link" onClick={switchDisplay} disabled={captureStatus === 'stopped'} title={DISPLAY_MODE === 'drawer' ? 'Abrir numa janela separada' : 'Voltar para o painel na página do vídeo'}>
+            {DISPLAY_MODE === 'drawer' ? 'abrir em janela' : 'voltar para o painel'}
           </button>
           <button className="danger" onClick={stop} disabled={captureStatus === 'stopped'}>
             {captureStatus === 'stopped' ? 'Parado' : 'Parar'}

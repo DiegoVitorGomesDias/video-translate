@@ -22,6 +22,8 @@ export default defineConfig({
     content_security_policy: {
       extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';",
     },
+    // O painel lateral é um iframe com viewer.html dentro da página do vídeo.
+    web_accessible_resources: [{ resources: ['viewer.html'], matches: ['<all_urls>'] }],
     minimum_chrome_version: '116',
   },
   vite: () => ({

@@ -7,7 +7,7 @@
 // Uso: node scripts/selftest-chrome.mjs [caminho-do-chrome]
 //      (ou defina CHROME_BIN). Precisa de `pnpm build` antes.
 import { spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,7 +15,13 @@ const chrome = process.argv[2] ?? process.env.CHROME_BIN ?? 'google-chrome';
 const extDir = new URL('../.output/chrome-mv3', import.meta.url).pathname;
 const port = 9333;
 const profile = mkdtempSync(join(tmpdir(), 'vt-profile-'));
-const proc = spawn(chrome, [
+// O perfil guarda os modelos baixados (~700 MB); apaga ao sair para não encher o /tmp.
+const cleanupProfile = () => { try { rmSync(profile, { recursive: true, force: true }); } catch {} };
+process.on('exit', cleanupProfile);
+process.on('SIGINT', () => { proc?.kill(); process.exit(130); });
+process.on('SIGTERM', () => { proc?.kill(); process.exit(143); });
+let proc;
+proc = spawn(chrome, [
   '--headless=new', '--no-sandbox', '--disable-gpu-sandbox', '--enable-unsafe-webgpu',
   `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
   `--load-extension=${extDir}`, `--disable-extensions-except=${extDir}`,
@@ -152,5 +158,45 @@ for (const choice of ['google', 'local']) {
   await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`).catch(() => {});
 }
 
+// Drawer: injeta o content script numa página simples (stub de chrome.runtime, já que
+// o teste não consegue conceder permissão de host) e confere que o iframe do viewer carrega.
+let drawerOk = false;
+{
+  const { readFileSync } = await import('node:fs');
+  const { createServer } = await import('node:http');
+  const code = readFileSync(`${extDir}/content-scripts/drawer.js`, 'utf8');
+  // Página http de verdade: about:blank tem origem opaca e não casa com web_accessible_resources.
+  const server = createServer((_req, res) => { res.setHeader('content-type', 'text/html'); res.end('<!doctype html><h1>página de teste</h1><video></video>'); });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const pageUrl = `http://127.0.0.1:${server.address().port}/`;
+  const r = await fetch(`http://127.0.0.1:${port}/json/new?${pageUrl}`, { method: 'PUT' });
+  const t = await r.json();
+  const w = new WebSocket(t.webSocketDebuggerUrl);
+  let n = 0;
+  const evaluate = (expression, awaitPromise = false) => new Promise((resolve) => {
+    const id = ++n;
+    const h = (ev) => { const m = JSON.parse(ev.data); if (m.id === id) { w.removeEventListener('message', h); resolve(m.result?.result?.value ?? m.result?.exceptionDetails?.text); } };
+    w.addEventListener('message', h);
+    w.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, awaitPromise, returnByValue: true } }));
+  });
+  await new Promise((resolve) => { w.onopen = resolve; });
+  await sleep(1000);
+  await evaluate(`window.chrome = { runtime: { id: '${extId}', getURL: (p) => 'chrome-extension://${extId}' + p, sendMessage: () => Promise.resolve(), onMessage: { addListener() {}, removeListener() {} } } }; 'ok'`);
+  const injected = await evaluate(`try { ${code}; 'ok' } catch (e) { 'erro: ' + e.message }`);
+  console.log('[drawer] injeção:', injected);
+  for (let i = 0; i < 20 && !drawerOk; i++) {
+    await sleep(250);
+    const hasFrame = await evaluate(`!!document.querySelector('#video-translate-drawer')?.shadowRoot?.querySelector('iframe')`);
+    const frameLoaded = (await targets()).some((x) => x.type === 'iframe' && x.url.includes('viewer.html?mode=drawer'));
+    drawerOk = hasFrame && frameLoaded;
+    if (i === 19 && !drawerOk) console.log('[drawer] debug: hasFrame=', hasFrame, 'targets=', (await targets()).map((x) => `${x.type}:${x.url.slice(0, 80)}`).join(' , '));
+  }
+  console.log(`[drawer] host com iframe do viewer carregado: ${drawerOk ? 'sim' : 'NÃO'}`);
+  w.close();
+  server.close();
+  await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`).catch(() => {});
+}
+
 proc.kill();
-process.exit(done && uiErrors === 0 && windowOk && mtOk ? 0 : 2);
+await sleep(1500);
+process.exit(done && uiErrors === 0 && windowOk && mtOk && drawerOk ? 0 : 2);

@@ -4,16 +4,19 @@
 
 import {
   CAPTURE_STATE_KEY,
+  DRAWER_TARGET,
   OFFSCREEN_TARGET,
   isBackgroundMessage,
   isBroadcastEvent,
   type CaptureState,
+  type DisplayMode,
   type OffscreenMessage,
 } from '@/lib/messages';
-import { loadOptions } from '@/lib/options';
+import { loadOptions, saveOptions } from '@/lib/options';
 
 const OFFSCREEN_URL = '/offscreen.html';
 const VIEWER_URL = '/viewer.html';
+const DRAWER_SCRIPT = '/content-scripts/drawer.js';
 
 const EMPTY_STATE: CaptureState = { tabId: null, windowId: null };
 
@@ -94,7 +97,60 @@ async function openViewer(): Promise<number | null> {
   }
 }
 
+// ---- Painel lateral (content script injetado sob demanda) ----
+
+async function drawerPresent(tabId: number): Promise<boolean> {
+  try {
+    const res = (await browser.tabs.sendMessage(tabId, { target: DRAWER_TARGET, type: 'ping' })) as { ok?: boolean } | undefined;
+    return res?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Injeta o drawer na aba. Devolve false se a página não aceitar (ex.: chrome://). */
+async function openDrawer(tabId: number): Promise<boolean> {
+  if (await drawerPresent(tabId)) return true;
+  try {
+    await browser.scripting.executeScript({ target: { tabId }, files: [DRAWER_SCRIPT] });
+    console.log(`[background] drawer injetado na aba ${tabId}`);
+    return true;
+  } catch (err) {
+    console.error('[background] não foi possível injetar o drawer:', err);
+    return false;
+  }
+}
+
+async function closeDrawer(tabId: number): Promise<void> {
+  await browser.tabs.sendMessage(tabId, { target: DRAWER_TARGET, type: 'close' }).catch(() => undefined);
+}
+
+/** Abre a superfície escolhida (drawer ou janela) para a captura atual. */
+async function showViewer(state: CaptureState, mode: DisplayMode): Promise<CaptureState> {
+  if (mode === 'drawer' && state.tabId !== null) {
+    if (await openDrawer(state.tabId)) {
+      const next = { ...state, mode: 'drawer' as const, windowId: null };
+      await setState(next);
+      return next;
+    }
+    console.warn('[background] caindo para a janela separada');
+  }
+  const windowId = await openViewer();
+  const next = { ...state, mode: 'window' as const, windowId };
+  await setState(next);
+  return next;
+}
+
+async function hideViewer(state: CaptureState): Promise<void> {
+  if (state.mode === 'drawer' && state.tabId !== null) await closeDrawer(state.tabId);
+  if (state.windowId != null) await browser.windows.remove(state.windowId).catch(() => undefined);
+}
+
 async function focusViewer(state: CaptureState): Promise<void> {
+  if (state.mode === 'drawer' && state.tabId !== null) {
+    if (!(await drawerPresent(state.tabId))) await showViewer(state, 'drawer');
+    return;
+  }
   if (state.windowId != null) {
     try {
       await browser.windows.update(state.windowId, { focused: true, drawAttention: true });
@@ -103,30 +159,36 @@ async function focusViewer(state: CaptureState): Promise<void> {
       /* janela não existe mais; abre outra */
     }
   }
-  const windowId = await openViewer();
-  await setState({ ...state, windowId });
+  await showViewer(state, 'window');
+}
+
+async function switchDisplay(mode: DisplayMode): Promise<void> {
+  const state = await getState();
+  if (state.tabId === null) return;
+  await hideViewer(state);
+  await showViewer({ ...state, windowId: null }, mode);
+  const options = await loadOptions();
+  await saveOptions({ ...options, displayMode: mode });
 }
 
 async function startCapture(tab: chrome.tabs.Tab): Promise<void> {
   if (tab.id === undefined) return;
   // 1. O streamId precisa ser pedido logo após o gesto do usuário (clique no ícone).
   const streamId = await browser.tabCapture.getMediaStreamId({ targetTabId: tab.id });
+  const options = await loadOptions();
 
-  // 2. Abre a janela já, antes de qualquer espera longa; erros aparecem dentro dela.
-  await setState({ tabId: tab.id, tabTitle: tab.title ?? '', windowId: null });
-  const windowId = await openViewer();
-  await setState({ tabId: tab.id, tabTitle: tab.title ?? '', windowId });
+  // 2. Mostra o viewer já (drawer na página ou janela), antes de qualquer espera longa.
+  const base: CaptureState = { tabId: tab.id, tabTitle: tab.title ?? '', windowId: null };
+  await setState(base);
+  await showViewer(base, options.displayMode);
 
   // 3. Offscreen + captura (o modelo carrega lá dentro, em paralelo com a UI).
   try {
-    const options = await loadOptions();
     await ensureOffscreenDocument();
     await sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'start-capture', streamId, tabId: tab.id, sttModel: options.sttModel });
     console.log(`[background] captura iniciada na aba ${tab.id} (${tab.title ?? ''})`);
   } catch (err) {
     console.error('[background] falha ao iniciar a captura:', err);
-    // Mantém a janela aberta mostrando o erro; o estado continua "capturando" para o
-    // usuário poder parar pelo botão / fechando a janela.
     browser.runtime.sendMessage({ type: 'capture-status', status: 'error', error: String(err) }).catch(() => undefined);
   }
 }
@@ -142,9 +204,7 @@ async function stopCapture(): Promise<void> {
     await browser.offscreen.closeDocument().catch(() => undefined);
   }
   await setState(EMPTY_STATE);
-  if (state.windowId != null) {
-    await browser.windows.remove(state.windowId).catch(() => undefined);
-  }
+  await hideViewer(state);
   console.log('[background] captura encerrada');
 }
 
@@ -166,8 +226,16 @@ export default defineBackground(() => {
   });
 
   browser.runtime.onMessage.addListener((msg: unknown) => {
-    if (isBackgroundMessage(msg) && msg.type === 'stop-capture-request') {
-      void stopCapture();
+    if (isBackgroundMessage(msg)) {
+      switch (msg.type) {
+        case 'stop-capture-request':
+        case 'drawer-closed':
+          void stopCapture();
+          break;
+        case 'switch-display':
+          void switchDisplay(msg.mode);
+          break;
+      }
       return;
     }
     if (isBroadcastEvent(msg) && msg.type === 'capture-status') {
@@ -185,6 +253,15 @@ export default defineBackground(() => {
   browser.windows.onRemoved.addListener(async (windowId) => {
     const state = await getState();
     if (state.windowId === windowId) await stopCapture();
+  });
+
+  // Navegação na aba capturada (recarga ou SPA): reinjeta o drawer quando o documento terminar.
+  browser.tabs.onUpdated.addListener(async (tabId, info) => {
+    if (info.status !== 'complete') return;
+    const state = await getState();
+    if (state.tabId === tabId && state.mode === 'drawer') {
+      await openDrawer(tabId);
+    }
   });
 
   // Se a aba capturada fechar, limpa tudo.

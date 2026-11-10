@@ -167,6 +167,9 @@ Resultado medido (Chrome com GPU): Moonshine tiny em WebGPU, modelo pronto em 2,
 **Fase 1: MVP** ✅ implementada em 09/11/2026 (falta teste manual)
 Janela da extensão com frases em inglês e tradução abaixo (via LibreTranslate, com fallback para o Chrome), texto provisório ao vivo, botões iniciar/parar, barra de download do modelo, tela de opções com a URL do LibreTranslate. Extras: seletor de modelo (Moonshine tiny/base, Whisper base.en), tamanho da fonte, segmentador de frases com testes.
 
+**Fase 1b: painel lateral** ✅ 10/11/2026
+A pedido do usuário, o viewer passou a abrir como painel lateral (drawer) dentro da própria página do vídeo, em vez de janela separada: content script injetado sob demanda com Shadow DOM + iframe de `viewer.html` (que continua página da extensão). Redimensionável, recolhível, reinjetado ao navegar na aba. A janela separada continua disponível nas opções e por um atalho no cabeçalho.
+
 **Fase 2: seleção do vídeo**
 Overlay para escolher o vídeo, pausa/retomada seguindo o vídeo, título do vídeo na janela, tentativa de `captureStream()` para isolar o áudio.
 
@@ -188,7 +191,7 @@ Preparar para a Chrome Web Store (ícones, descrição, política de privacidade
 
 1. Navegador: Chrome/Edge (Chromium), Manifest V3.
 2. Transcrição: modo local gratuito (Moonshine/Whisper via transformers.js). Tradução: LibreTranslate, com fallback para a Translator API do Chrome.
-3. Interface: janela separada (popup).
+3. Interface: painel lateral na página do vídeo (padrão desde 10/11/2026); janela separada como opção.
 4. Uso local, mas estruturado desde o começo para publicação na Chrome Web Store.
 5. UI em React.
 6. (09/11/2026) Último recurso de tradução: modelo local no navegador (opus-mt) por padrão; Google não oficial só se o usuário escolher.

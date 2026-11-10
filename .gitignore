@@ -9,3 +9,5 @@ stats-*.json
 *.log
 # Binários do onnxruntime-web copiados por scripts/copy-ort.mjs
 public/onnx/
+pwa/public/onnx/
+pwa/dist/

@@ -18,15 +18,16 @@ const ortEntry = ortRequire.resolve('onnxruntime-web');
 const ortDist = dirname(ortEntry);
 
 const files = ['ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.asyncify.wasm'];
-const outDir = join(root, 'public', 'onnx');
-mkdirSync(outDir, { recursive: true });
-
-for (const f of files) {
-  const src = join(ortDist, f);
-  if (!existsSync(src)) {
-    console.error(`[copy-ort] arquivo não encontrado: ${src}`);
-    process.exit(1);
+// Extensão (public/onnx) e PWA (pwa/public/onnx).
+for (const outDir of [join(root, 'public', 'onnx'), join(root, 'pwa', 'public', 'onnx')]) {
+  mkdirSync(outDir, { recursive: true });
+  for (const f of files) {
+    const src = join(ortDist, f);
+    if (!existsSync(src)) {
+      console.error(`[copy-ort] arquivo não encontrado: ${src}`);
+      process.exit(1);
+    }
+    copyFileSync(src, join(outDir, f));
+    console.log(`[copy-ort] ${f} -> ${outDir.replace(root + '/', '')}/`);
   }
-  copyFileSync(src, join(outDir, f));
-  console.log(`[copy-ort] ${f} -> public/onnx/`);
 }

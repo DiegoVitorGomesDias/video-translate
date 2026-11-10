@@ -6,6 +6,7 @@
   },
   "exclude": [
     "tests",
+    "pwa",
     "node_modules",
     ".output"
   ]

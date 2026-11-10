@@ -6,12 +6,13 @@ Extensão Chrome (Manifest V3) que captura o áudio de um vídeo tocando na aba,
 
 O que a extensão faz hoje:
 
-- **Clique no ícone** numa aba com vídeo: o service worker pede `chrome.tabCapture.getMediaStreamId`, cria o documento offscreen, começa a captura e abre a **janela do viewer** (popup 480×720). O ícone mostra o selo `REC`. Clicar de novo só foca a janela.
+- **Clique no ícone** numa aba com vídeo: o service worker pede `chrome.tabCapture.getMediaStreamId`, cria o documento offscreen, começa a captura e mostra o viewer como um **painel lateral** dentro da própria página (padrão) ou numa **janela separada** (opção). O ícone mostra o selo `REC`. Clicar de novo reabre/foca o painel.
 - **Áudio**: o offscreen faz `getUserMedia` com o stream da aba, liga o som de volta no `AudioContext.destination` (o vídeo continua audível) e um `AudioWorklet` gera mono 16 kHz.
 - **Transcrição local** com `@huggingface/transformers` num Web Worker: Moonshine tiny por padrão (WebGPU, com fallback para WASM), Moonshine base ou Whisper base.en nas opções. Um VAD por energia fecha trechos com ~400 ms de silêncio ou 6 s no máximo; enquanto um trecho está aberto, a cada 1,5 s sai um **texto provisório** (cinza, itálico) na última linha.
 - **Frases**: os finais são divididos por `. ? !` (respeitando abreviações, iniciais e decimais); restos sem pontuação são juntados ao próximo final ou fechados após 120 caracteres / 5 s.
 - **Tradução EN→PT** na janela: **LibreTranslate** se houver URL configurada e a instância responder, senão a **Translator API do Chrome** (138+, local, sem chave). O cabeçalho mostra qual está ativo. Cache por frase.
-- **Parar**: botão na janela ou fechar a janela. Fechar a aba capturada também encerra.
+- **Painel lateral**: um content script injetado sob demanda cria um host com Shadow DOM fixo à direita (400 px, redimensionável arrastando a borda esquerda) com um iframe de `viewer.html`, que continua sendo página da extensão (workers, cache, fetch). Botão `›` recolhe (a captura continua; uma aba fina reabre), `✕` fecha e para. Se a página recarregar ou navegar (YouTube/Prime são SPAs), o painel é reinjetado. No cabeçalho dá para trocar entre "abrir em janela" e "voltar para o painel".
+- **Parar**: botão Parar, fechar o painel/janela ou fechar a aba capturada.
 - **Opções** (`chrome://extensions` → Detalhes → Opções da extensão): URL e chave do LibreTranslate com "testar conexão", modelo de transcrição, tamanho da fonte.
 
 Ainda não há seleção do vídeo na página (Fase 2) nem exportação/legenda sobreposta (Fase 3).
@@ -72,8 +73,8 @@ pnpm build
 
    **Para atualizar**: rode `pnpm build` de novo e clique no ícone de recarregar no card da extensão (ou no botão "Atualizar" no topo da página). Confira a **versão** no card: ela sobe a cada mudança (`package.json` → manifest) e aparece também no cabeçalho da janela, no rodapé das opções e no console do service worker (`[background] video-translate vX.Y.Z`). Se a versão não mudou, o Chrome ainda está com a build antiga.
 4. Abra uma aba com um vídeo em inglês tocando (YouTube, Prime Video, etc.) e clique no ícone da extensão (fixe-o pelo menu de extensões, se não aparecer). Abre a janela do viewer; o som do vídeo continua normal.
-5. Na janela: o cabeçalho mostra o carregamento do modelo (barra de progresso na primeira vez), depois "Ouvindo · moonshine-tiny (GPU)". As frases em inglês aparecem em cards com a tradução embaixo; a última linha em cinza é o texto provisório.
-6. Para parar: botão **Parar** ou fechar a janela.
+5. No painel lateral (ou na janela, conforme as opções): o cabeçalho mostra o carregamento do modelo (barra de progresso na primeira vez), depois "Ouvindo · moonshine-tiny (GPU)". As frases em inglês aparecem em cards com a tradução embaixo; a última linha em cinza é o texto provisório.
+6. Para parar: botão **Parar**, `✕` no painel ou fechar a janela.
 
 ### Depuração
 
@@ -110,11 +111,14 @@ Para checar só o runtime ONNX, o download do modelo e a inferência (sem `tabCa
 node scripts/selftest-chrome.mjs /caminho/para/chrome
 ```
 
-O script também abre `viewer.html` e `options.html` (falha se houver exceção ou `console.error`; falhas de rede, como o LibreTranslate desligado, não contam), cria a janela do viewer pelo service worker e testa os dois fallbacks de tradução pela página de opções.
+O script também abre `viewer.html` e `options.html` (falha se houver exceção ou `console.error`; falhas de rede, como o LibreTranslate desligado, não contam), cria a janela do viewer pelo service worker, testa os dois fallbacks de tradução pela página de opções e injeta o painel lateral numa página http local conferindo que o iframe do viewer carrega.
 
 Resultado de referência (Chrome for Testing 146 headless, GPU por software): Moonshine tiny carregou em WebGPU em ~17 s na primeira vez (download + aquecimento) e transcreveu 1 s de áudio em ~1,2 s.
 
 ### Problemas conhecidos
+
+- O painel lateral some quando o vídeo entra em tela cheia (o navegador só mostra o elemento em fullscreen); use a janela separada nesse caso. Em páginas que não aceitam scripts (`chrome://`, Chrome Web Store) a extensão cai para a janela.
+- O painel precisa de `web_accessible_resources` para `viewer.html` em `<all_urls>`; é só o HTML do viewer, que não expõe dados.
 
 - WebGPU dentro de um Web Worker de documento offscreen pode não estar disponível em todas as versões do Chrome; nesse caso o worker cai para WASM automaticamente (mais lento).
 - O VAD é por energia, então música de fundo alta pode manter o trecho "aberto" até o limite de 6 s, e trechos só de música podem virar texto sem sentido.
@@ -136,7 +140,8 @@ video-translate/
     ├── entrypoints/
     │   ├── background.ts         # service worker: clique → streamId → offscreen → janela
     │   ├── offscreen/            # captura, AudioWorklet, VAD, parciais, provedor de STT
-    │   ├── viewer/               # janela com as frases EN + PT (React)
+    │   ├── drawer.content.ts     # painel lateral (Shadow DOM + iframe do viewer), injetado sob demanda
+    │   ├── viewer/               # frases EN + PT (React); roda no painel ou na janela
     │   ├── options/              # LibreTranslate, modelo, fonte (React)
     │   └── pcm-worklet.ts        # gera /pcm-worklet.js para audioWorklet.addModule
     └── lib/

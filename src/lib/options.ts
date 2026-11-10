@@ -1,6 +1,6 @@
 // Configurações do usuário, guardadas em chrome.storage.local.
 
-import type { SttModelId } from './messages';
+import type { DisplayMode, SttModelId } from './messages';
 import { DEFAULT_STT_MODEL } from './stt/models';
 
 export interface Options {
@@ -12,6 +12,8 @@ export interface Options {
   translationFallback: 'local' | 'google' | 'none';
   /** Tamanho da fonte das legendas, em px. */
   fontSize: number;
+  /** Painel lateral na própria página (padrão) ou janela separada. */
+  displayMode: DisplayMode;
 }
 
 export const DEFAULT_OPTIONS: Options = {
@@ -20,6 +22,7 @@ export const DEFAULT_OPTIONS: Options = {
   sttModel: DEFAULT_STT_MODEL,
   translationFallback: 'local',
   fontSize: 18,
+  displayMode: 'drawer',
 };
 
 export const OPTIONS_KEY = 'options';

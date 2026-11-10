@@ -178,6 +178,12 @@ export function App() {
 
       <section>
         <h2>Aparência</h2>
+        <label htmlFor="displayMode">Onde mostrar as legendas</label>
+        <select id="displayMode" value={opts.displayMode} onChange={(e) => update('displayMode', e.target.value as Options['displayMode'])}>
+          <option value="drawer">Painel lateral na própria página do vídeo (padrão)</option>
+          <option value="window">Janela separada</option>
+        </select>
+        <p className="hint">O painel some em tela cheia (é o esperado) e em páginas que não aceitam scripts (chrome://, loja); nesses casos a janela é usada.</p>
         <label htmlFor="fontSize">Tamanho da fonte: {opts.fontSize}px</label>
         <input id="fontSize" type="range" min={12} max={32} step={1} value={opts.fontSize} onChange={(e) => update('fontSize', Number(e.target.value))} />
         <div className="preview" style={{ ['--preview-size' as string]: `${opts.fontSize}px` }}>

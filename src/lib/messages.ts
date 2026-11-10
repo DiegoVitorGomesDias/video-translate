@@ -3,6 +3,9 @@
 
 export const OFFSCREEN_TARGET = 'offscreen' as const;
 export const BACKGROUND_TARGET = 'background' as const;
+export const DRAWER_TARGET = 'drawer' as const;
+
+export type DisplayMode = 'drawer' | 'window';
 
 export type SttModelId = 'moonshine-tiny' | 'moonshine-base' | 'whisper-base.en';
 
@@ -42,7 +45,34 @@ export interface StopCaptureRequestMessage {
   type: 'stop-capture-request';
 }
 
-export type BackgroundMessage = StopCaptureRequestMessage;
+/** O drawer foi fechado pelo usuário (botão X). */
+export interface DrawerClosedMessage {
+  target: typeof BACKGROUND_TARGET;
+  type: 'drawer-closed';
+}
+
+/** Troca entre painel lateral e janela durante a captura. */
+export interface SwitchDisplayMessage {
+  target: typeof BACKGROUND_TARGET;
+  type: 'switch-display';
+  mode: DisplayMode;
+}
+
+export type BackgroundMessage = StopCaptureRequestMessage | DrawerClosedMessage | SwitchDisplayMessage;
+
+// ---- Para o content script do drawer (via tabs.sendMessage) ----
+
+export interface DrawerCloseMessage {
+  target: typeof DRAWER_TARGET;
+  type: 'close';
+}
+
+export interface DrawerPingMessage {
+  target: typeof DRAWER_TARGET;
+  type: 'ping';
+}
+
+export type DrawerMessage = DrawerCloseMessage | DrawerPingMessage;
 
 // ---- Eventos (broadcast do offscreen; background e viewer escutam) ----
 
@@ -84,6 +114,8 @@ export interface CaptureState {
   tabId: number | null;
   tabTitle?: string;
   windowId?: number | null;
+  /** Como o viewer está sendo mostrado nesta captura. */
+  mode?: DisplayMode;
 }
 
 export const CAPTURE_STATE_KEY = 'captureState';
@@ -96,6 +128,10 @@ export function isOffscreenMessage(msg: unknown): msg is OffscreenMessage {
 
 export function isBackgroundMessage(msg: unknown): msg is BackgroundMessage {
   return hasTarget(msg, BACKGROUND_TARGET);
+}
+
+export function isDrawerMessage(msg: unknown): msg is DrawerMessage {
+  return hasTarget(msg, DRAWER_TARGET);
 }
 
 export function isBroadcastEvent(msg: unknown): msg is BroadcastEvent {
