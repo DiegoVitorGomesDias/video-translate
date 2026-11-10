@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { DEFAULT_OPTIONS, loadOptions, originPattern, saveOptions, type Options } from '@/lib/options';
 import { STT_MODELS } from '@/lib/stt/models';
 import { chromeSpeechAvailability, chromeSpeechInstall, type ChromeSpeechAvailability } from '@/lib/stt/chrome-speech';
+import { serverSpeechPing, serverSpeechProbe } from '@/lib/stt/server-speech';
 import { VAD_PROFILES, type VadProfile } from '@/lib/audio/vad';
 import { LibreTranslateProvider, chromeTranslatorBestPair, ChromeTranslatorProvider, LOCAL_MT_DOWNLOAD_MB, LocalOpusProvider, GoogleFreeProvider } from '@/lib/translate';
 import type { SttModelId } from '@/lib/messages';
@@ -28,6 +29,39 @@ export function App() {
   const [includeKey, setIncludeKey] = useState(false);
   const [speech, setSpeech] = useState<ChromeSpeechAvailability | 'checking' | 'installing'>('checking');
   const [speechMsg, setSpeechMsg] = useState<string | null>(null);
+  const [serverTest, setServerTest] = useState<TestState>({ kind: 'idle' });
+
+  const ensureOrigin = async (url: string): Promise<string | null> => {
+    const pattern = originPattern(url);
+    if (!pattern) return 'URL inválida: use http:// ou https://';
+    const has = await browser.permissions.contains({ origins: [pattern] }).catch(() => false);
+    if (has) return null;
+    const granted = await browser.permissions.request({ origins: [pattern] }).catch(() => false);
+    return granted ? null : `permissão para ${pattern} negada`;
+  };
+
+  const testServer = async () => {
+    const url = opts.sttServerUrl.trim();
+    if (!url) return;
+    setServerTest({ kind: 'testing' });
+    const denied = await ensureOrigin(url);
+    if (denied) {
+      setServerTest({ kind: 'error', error: denied });
+      return;
+    }
+    const cfg = { url, format: opts.sttServerFormat, model: opts.sttServerModel.trim(), apiKey: opts.sttServerApiKey.trim() };
+    const ping = await serverSpeechPing(cfg);
+    if (!ping.ok) {
+      setServerTest({ kind: 'error', error: ping.error });
+      return;
+    }
+    const probe = await serverSpeechProbe(cfg);
+    if (!probe.ok) {
+      setServerTest({ kind: 'error', error: `${ping.info}; inferência falhou: ${probe.error}` });
+      return;
+    }
+    setServerTest({ kind: 'ok', sample: `${ping.info}; 1 s de áudio transcrito em ${(probe.ms / 1000).toFixed(1)} s` });
+  };
 
   useEffect(() => {
     void loadOptions().then((o) => {
@@ -71,7 +105,12 @@ export function App() {
         setSaveMsg(`Permissão para ${pattern} negada; a tradução via LibreTranslate não vai funcionar.`);
       }
     }
-    await saveOptions({ ...opts, libreUrl: url, libreApiKey: opts.libreApiKey.trim() });
+    const serverUrl = opts.sttServerUrl.trim();
+    if (opts.sttEngine === 'server' && serverUrl) {
+      const denied = await ensureOrigin(serverUrl);
+      if (denied) setSaveMsg(`${denied}; o servidor de transcrição não vai funcionar.`);
+    }
+    await saveOptions({ ...opts, libreUrl: url, libreApiKey: opts.libreApiKey.trim(), sttServerUrl: serverUrl, sttServerModel: opts.sttServerModel.trim(), sttServerApiKey: opts.sttServerApiKey.trim() });
     setSaveMsg((m) => m ?? 'Salvo.');
   };
 
@@ -257,6 +296,50 @@ export function App() {
             {speechMsg && <div>{speechMsg}</div>}
           </div>
         </label>
+        <label className={`model ${opts.sttEngine === 'server' ? 'selected' : ''}`}>
+          <input type="radio" name="sttEngine" value="server" checked={opts.sttEngine === 'server'} onChange={() => update('sttEngine', 'server')} />
+          <span className="name">Servidor local (Docker)</span>
+          <div className="desc">
+            Roda o Whisper fora do navegador, com whisper.cpp em Docker (CPU, CUDA ou Vulkan). Mais rápido que o WebGPU e com janela de 15 s em vez de 30 s. Se o servidor não
+            responder, a captura cai para o modelo local. Como subir: veja <code>docker/README.md</code> no repositório ou o README principal.
+          </div>
+        </label>
+        {opts.sttEngine === 'server' && (
+          <div style={{ marginLeft: 24 }}>
+            <label htmlFor="sttServerUrl">URL do servidor</label>
+            <input
+              id="sttServerUrl"
+              type="url"
+              placeholder="http://localhost:8080"
+              value={opts.sttServerUrl}
+              onChange={(e) => {
+                update('sttServerUrl', e.target.value);
+                setServerTest({ kind: 'idle' });
+              }}
+            />
+            <label htmlFor="sttServerFormat">Formato da API</label>
+            <select id="sttServerFormat" value={opts.sttServerFormat} onChange={(e) => update('sttServerFormat', e.target.value as Options['sttServerFormat'])}>
+              <option value="whispercpp">whisper.cpp (POST /inference; padrão do docker/ deste projeto)</option>
+              <option value="openai">Compatível com OpenAI (POST /v1/audio/transcriptions: Speaches, ScribeCrate, LocalAI)</option>
+            </select>
+            {opts.sttServerFormat === 'openai' && (
+              <>
+                <label htmlFor="sttServerModel">Nome do modelo (campo "model")</label>
+                <input id="sttServerModel" type="text" value={opts.sttServerModel} onChange={(e) => update('sttServerModel', e.target.value)} placeholder="whisper-1" />
+              </>
+            )}
+            <label htmlFor="sttServerKey">Chave da API (opcional)</label>
+            <input id="sttServerKey" type="password" value={opts.sttServerApiKey} onChange={(e) => update('sttServerApiKey', e.target.value)} autoComplete="off" />
+            <div className="row">
+              <button onClick={() => void testServer()} disabled={!opts.sttServerUrl.trim() || serverTest.kind === 'testing'}>
+                {serverTest.kind === 'testing' ? 'Testando…' : 'Testar servidor'}
+              </button>
+              {serverTest.kind === 'ok' && <span className="status ok">OK: {serverTest.sample}</span>}
+              {serverTest.kind === 'error' && <span className="status error">Falhou: {serverTest.error}</span>}
+            </div>
+            <p className="hint">O servidor recebe cada trecho de fala como WAV e devolve o texto; o glossário e as últimas frases vão como prompt. Nada sai da sua rede.</p>
+          </div>
+        )}
       </section>
 
       <section>

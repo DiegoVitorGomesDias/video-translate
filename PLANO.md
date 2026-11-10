@@ -104,6 +104,8 @@ Como funciona o modo local:
 
 **v0.6.6:** o Whisper recebe **contexto por prompt** (`<|startofprev|>` + glossário + últimas 3 frases finais + tokens iniciais, via `decoder_input_ids`, até 96 tokens; o prefixo é removido do texto decodificado), então nomes do título e o assunto das frases anteriores guiam a transcrição. Moonshine não aceita prompt. Em modelos pesados (inferência de um final acima de 1 s) os parciais são pulados: no Whisper cada passe custa o encoder inteiro (janela fixa de 30 s), e um parcial atrasaria o final seguinte.
 
+**v0.6.7: motor "servidor local".** Para velocidade, o Whisper pode rodar fora do navegador: `docker/docker-compose.yml` sobe o `whisper-server` do whisper.cpp (large-v3-turbo q5_0, `--audio-ctx 768` = janela de ~15 s em vez de 30 s, CPU/CUDA/Vulkan) e o LibreTranslate. `src/lib/stt/server-speech.ts` manda cada trecho do VAD como WAV 16 kHz para `POST /inference` (ou `POST /v1/audio/transcriptions`, formato OpenAI, para Speaches/ScribeCrate/LocalAI), com prompt de glossário + últimas frases, mesma fila com prioridade do worker local e parciais pulados quando o servidor passa de 1 s por final. Indisponível → cai para o modelo local. A janela de 30 s do modelo ONNX no navegador não pode ser reduzida (posições do encoder fixas no export); só o whisper.cpp tem `--audio-ctx`.
+
 | Opção | Download | WER médio | Streaming | Glossário |
 |---|---|---|---|---|
 | Moonshine tiny | 28 a 110 MB | ~12% | por trechos do VAD | não |

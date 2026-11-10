@@ -1,0 +1,64 @@
+# Serviços locais do Video Translate: transcrição (whisper.cpp) e tradução (LibreTranslate).
+#
+#   cd docker && docker compose up -d            # CPU
+#   docker compose logs -f whisper               # acompanha o download do modelo (1ª vez)
+#
+# Variáveis (opcionais, no ambiente ou num arquivo .env ao lado):
+#   WHISPER_MODEL=large-v3-turbo-q5_0   modelo ggml (large-v3-turbo, large-v3-turbo-q5_0, small.en, base.en...)
+#   WHISPER_AUDIO_CTX=768               janela do encoder: 1500 = 30 s (original), 768 ≈ 15 s (mais rápido)
+#   WHISPER_THREADS=4                   threads de CPU
+#
+# GPU: troque a imagem e descomente o bloco correspondente abaixo.
+#   NVIDIA: ghcr.io/ggml-org/whisper.cpp:main-cuda   (precisa do NVIDIA Container Toolkit)
+#   AMD/Intel: ghcr.io/ggml-org/whisper.cpp:main-vulkan (mapeia /dev/dri)
+
+services:
+  whisper:
+    image: ghcr.io/ggml-org/whisper.cpp:main
+    container_name: video-translate-whisper
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - whisper-models:/models
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3-turbo-q5_0}
+      WHISPER_AUDIO_CTX: ${WHISPER_AUDIO_CTX:-768}
+      WHISPER_THREADS: ${WHISPER_THREADS:-4}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if [ ! -f "/models/ggml-$${WHISPER_MODEL}.bin" ]; then
+          echo "[whisper] baixando o modelo $${WHISPER_MODEL}..."
+          ./models/download-ggml-model.sh "$${WHISPER_MODEL}" /models
+        fi
+        echo "[whisper] iniciando whisper-server (audio-ctx=$${WHISPER_AUDIO_CTX}, threads=$${WHISPER_THREADS})"
+        exec whisper-server --host 0.0.0.0 --port 8080 \
+          -m "/models/ggml-$${WHISPER_MODEL}.bin" -l en -nc \
+          -t "$${WHISPER_THREADS}" -ac "$${WHISPER_AUDIO_CTX}" -fa
+    # --- NVIDIA (imagem main-cuda) ---
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    # --- AMD/Intel via Vulkan (imagem main-vulkan) ---
+    # devices:
+    #   - /dev/dri:/dev/dri
+
+  libretranslate:
+    image: libretranslate/libretranslate
+    container_name: video-translate-libretranslate
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    command: ["--load-only", "en,pt"]
+    volumes:
+      - libretranslate-models:/home/libretranslate/.local
+
+volumes:
+  whisper-models:
+  libretranslate-models:

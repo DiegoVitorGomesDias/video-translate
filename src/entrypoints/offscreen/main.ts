@@ -21,6 +21,7 @@ import { SileroVad } from '@/lib/audio/silero-vad';
 import { VAD_PROFILES } from '@/lib/audio/vad';
 import { extractTermsFromTitle, mergeTerms, parseGlossary } from '@/lib/context';
 import { ChromeSpeechProvider } from '@/lib/stt/chrome-speech';
+import { DEFAULT_SERVER_SPEECH, ServerSpeechProvider, type ServerSpeechConfig } from '@/lib/stt/server-speech';
 import { LocalTransformersProvider } from '@/lib/stt/local-transformers';
 import { candidatesFor } from '@/lib/stt/models';
 import type { SpeechProvider, TranscriptResult } from '@/lib/stt/SpeechProvider';
@@ -104,14 +105,16 @@ function handleResult(r: TranscriptResult): void {
 
 const resolveUrl = (p: string) => browser.runtime.getURL(p as never);
 
-function createProvider(model: SttModelId, engine: SttEngineId = 'local'): SpeechProvider {
+function createProvider(model: SttModelId, engine: SttEngineId = 'local', server: ServerSpeechConfig = DEFAULT_SERVER_SPEECH): SpeechProvider {
   const provider: SpeechProvider =
     engine === 'chrome'
       ? new ChromeSpeechProvider()
-      : new LocalTransformersProvider({
-          candidates: candidatesFor(model),
-          resolveUrl,
-        });
+      : engine === 'server'
+        ? new ServerSpeechProvider(server)
+        : new LocalTransformersProvider({
+            candidates: candidatesFor(model),
+            resolveUrl,
+          });
   provider.onStatus = (s) => {
     lastStatus = { type: 'stt-status', ...s };
     if (s.state === 'loading' && s.progress !== undefined) log(`modelo: ${s.message} ${s.progress.toFixed(0)}%`);
@@ -120,13 +123,22 @@ function createProvider(model: SttModelId, engine: SttEngineId = 'local'): Speec
   };
   provider.onResult = handleResult;
   // Status imediato, antes de o worker subir, para o viewer já mostrar o que está carregando.
-  const first = engine === 'chrome' ? undefined : candidatesFor(model)[0];
-  lastStatus = { type: 'stt-status', state: 'loading', message: engine === 'chrome' ? 'Iniciando o reconhecimento do Chrome' : `Iniciando ${first?.modelId ?? model}`, progress: 0, model: first?.modelId, device: first?.device };
+  const first = engine === 'local' ? candidatesFor(model)[0] : undefined;
+  const starting = engine === 'chrome' ? 'Iniciando o reconhecimento do Chrome' : engine === 'server' ? `Conectando ao servidor ${server.url}` : `Iniciando ${first?.modelId ?? model}`;
+  lastStatus = { type: 'stt-status', state: 'loading', message: starting, progress: 0, model: first?.modelId, device: engine === 'local' ? first?.device : engine };
   broadcast(lastStatus);
   return provider;
 }
 
-async function startCapture(streamId: string, tabId: number, model: SttModelId, engine: SttEngineId, profile: VadProfileId, initialContext: SpeechContext): Promise<void> {
+async function startCapture(
+  streamId: string,
+  tabId: number,
+  model: SttModelId,
+  engine: SttEngineId,
+  profile: VadProfileId,
+  initialContext: SpeechContext,
+  server: ServerSpeechConfig,
+): Promise<void> {
   if (session) {
     log('já capturando; parando a sessão anterior');
     await stopCapture();
@@ -173,7 +185,7 @@ async function startCapture(streamId: string, tabId: number, model: SttModelId, 
       broadcast({ type: 'capture-status', status: 'started', applied });
     }
   };
-  let provider = createProvider(model, engine);
+  let provider = createProvider(model, engine, server);
 
   let providerReady = false;
   let pendingSegments = 0;
@@ -254,9 +266,9 @@ async function startCapture(streamId: string, tabId: number, model: SttModelId, 
   try {
     await startProvider(provider);
   } catch (err) {
-    if (engine === 'chrome' && session) {
-      // Reconhecimento do Chrome indisponível: cai para o modelo local sem parar a captura.
-      console.warn('[offscreen] reconhecimento do Chrome indisponível, usando o modelo local:', err);
+    if (engine !== 'local' && session) {
+      // Chrome/servidor indisponível: cai para o modelo local sem parar a captura.
+      console.warn(`[offscreen] motor ${engine} indisponível, usando o modelo local:`, err);
       await provider.stop().catch(() => undefined);
       provider = createProvider(model, 'local');
       wrapResult(provider);
@@ -300,7 +312,15 @@ browser.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
   const run = async (): Promise<unknown> => {
     switch (m.type) {
       case 'start-capture':
-        await startCapture(m.streamId, m.tabId, m.sttModel, m.sttEngine ?? 'local', m.vadProfile ?? 'normal', m.context ?? { tabTitle: '', useTabContext: true, glossary: '' });
+        await startCapture(
+          m.streamId,
+          m.tabId,
+          m.sttModel,
+          m.sttEngine ?? 'local',
+          m.vadProfile ?? 'normal',
+          m.context ?? { tabTitle: '', useTabContext: true, glossary: '' },
+          { ...DEFAULT_SERVER_SPEECH, ...(m.server ?? {}) },
+        );
         return { ok: true };
       case 'set-context':
         session?.setContext(m.context);

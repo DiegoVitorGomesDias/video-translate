@@ -9,7 +9,7 @@ export type DisplayMode = 'drawer' | 'window';
 
 export type SttModelId = 'auto' | 'moonshine-tiny' | 'moonshine-base' | 'whisper-base.en' | 'whisper-large-v3-turbo';
 /** Motor de transcrição: modelo local (transformers.js) ou reconhecimento nativo do Chrome no dispositivo. */
-export type SttEngineId = 'local' | 'chrome';
+export type SttEngineId = 'local' | 'chrome' | 'server';
 export type VadEngineId = 'silero' | 'energy';
 export type VadProfileId = 'fast' | 'normal' | 'long';
 export type SegmentEndReason = 'silence' | 'max-length' | 'flush';
@@ -26,6 +26,8 @@ export interface StartCaptureMessage {
   vadProfile: VadProfileId;
   /** Contexto inicial (o offscreen não acessa chrome.storage; o background manda). */
   context?: SpeechContext;
+  /** Configuração do servidor local de transcrição (motor 'server'). */
+  server?: { url: string; format: 'whispercpp' | 'openai'; model: string; apiKey: string };
 }
 
 /** Fonte do glossário para o reconhecimento do Chrome: título da aba e opções. */

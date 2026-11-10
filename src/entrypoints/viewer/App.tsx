@@ -302,16 +302,20 @@ export function App() {
   const configLine = useMemo(() => {
     const cfg = applied ?? (options ? { sttModel: options.sttModel, vadProfile: options.sentenceSplit } : null);
     if (!cfg) return null;
-    const chrome = cfg.activeEngine === 'chrome' || (cfg.activeEngine === undefined && cfg.sttEngine === 'chrome');
-    const backend = stt?.state === 'ready' ? (stt.device === 'webgpu' ? 'GPU' : stt.device === 'chrome' ? 'nativo' : 'WASM') : stt?.state === 'loading' ? 'carregando' : null;
+    const active = cfg.activeEngine ?? cfg.sttEngine ?? 'local';
+    const chrome = active === 'chrome';
+    const server = active === 'server';
+    const backend =
+      stt?.state === 'ready' ? (stt.device === 'webgpu' ? 'GPU' : stt.device === 'chrome' ? 'nativo' : stt.device === 'server' ? 'Docker' : 'WASM') : stt?.state === 'loading' ? 'carregando' : null;
     const vp = VAD_PROFILES[cfg.vadProfile] ?? VAD_PROFILES.normal;
-    const modelLabel = chrome ? 'Chrome no dispositivo' : modelLabelFor(stt?.state === 'ready' ? stt.model : undefined, cfg.sttModel);
-    const fellBack = cfg.sttEngine === 'chrome' && cfg.activeEngine === 'local';
+    const modelLabel = chrome ? 'Chrome no dispositivo' : server ? `Servidor local (${stt?.model ?? 'whisper'})` : modelLabelFor(stt?.state === 'ready' ? stt.model : undefined, cfg.sttModel);
+    const fellBack = (cfg.sttEngine ?? 'local') !== 'local' && cfg.activeEngine === 'local';
+    const fellBackLabel = cfg.sttEngine === 'chrome' ? ' (Chrome indisponível)' : ' (servidor indisponível)';
     const vadLabel = chrome ? '' : cfg.vadEngine === 'silero' ? ' · Silero' : cfg.vadEngine === 'energy' ? ' · energia' : '';
     const changed =
       !!applied && !!options && (options.sttModel !== applied.sttModel || options.sentenceSplit !== applied.vadProfile || options.sttEngine !== (applied.sttEngine ?? 'local'));
     return {
-      model: `${modelLabel}${backend ? ` · ${backend}` : ''}${fellBack ? ' (Chrome indisponível)' : ''}`,
+      model: `${modelLabel}${backend ? ` · ${backend}` : ''}${fellBack ? fellBackLabel : ''}`,
       split: `Separação: ${vp.label} (${vp.silenceMs / 1000} s / ${vp.maxSegmentMs / 1000} s)${vadLabel}`,
       changed,
       isApplied: !!applied,
@@ -466,6 +470,7 @@ function describeStatus(
   }
   if (stt.state === 'error') return { kind: 'error', text: 'Modelo não carregou', detail: stt.message };
   if (stt.device === 'chrome') return { kind: 'listening', text: 'Ouvindo · Chrome no dispositivo', detail: stt.message };
+  if (stt.device === 'server') return { kind: 'listening', text: `Ouvindo · servidor local (${stt.model ?? 'whisper'})`, detail: stt.message };
   const device = stt.device === 'webgpu' ? 'GPU' : 'CPU';
   return { kind: 'listening', text: `Ouvindo · ${modelShortName(stt.model ?? '')} (${device})`, detail: stt.message };
 }

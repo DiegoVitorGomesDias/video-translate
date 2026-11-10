@@ -8,8 +8,13 @@ export interface Options {
   libreUrl: string;
   libreApiKey: string;
   sttModel: SttModelId;
-  /** Modelo local (transformers.js) ou reconhecimento nativo do Chrome no dispositivo. */
+  /** Modelo local (transformers.js), reconhecimento nativo do Chrome ou servidor local (Docker). */
   sttEngine: SttEngineId;
+  /** Servidor local de transcrição (whisper.cpp em /inference ou API compatível com OpenAI). */
+  sttServerUrl: string;
+  sttServerFormat: 'whispercpp' | 'openai';
+  sttServerModel: string;
+  sttServerApiKey: string;
   /** Separação de frases: pausa e duração máxima do trecho (ver VAD_PROFILES). */
   sentenceSplit: VadProfileId;
   /** Último recurso quando LibreTranslate e Chrome falham. */
@@ -29,6 +34,10 @@ export const DEFAULT_OPTIONS: Options = {
   libreApiKey: '',
   sttModel: DEFAULT_STT_MODEL,
   sttEngine: 'local',
+  sttServerUrl: 'http://localhost:8080',
+  sttServerFormat: 'whispercpp',
+  sttServerModel: 'whisper-1',
+  sttServerApiKey: '',
   sentenceSplit: 'normal',
   translationFallback: 'local',
   fontSize: 18,

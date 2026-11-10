@@ -218,6 +218,7 @@ async function startCapture(tab: chrome.tabs.Tab): Promise<void> {
       sttEngine: options.sttEngine,
       vadProfile: options.sentenceSplit,
       context: { tabTitle: tab.title ?? '', useTabContext: options.useTabContext, glossary: options.glossary },
+      server: { url: options.sttServerUrl.trim(), format: options.sttServerFormat, model: options.sttServerModel.trim(), apiKey: options.sttServerApiKey.trim() },
     });
     console.log(`[background] captura iniciada na aba ${tab.id} (${tab.title ?? ''})`);
   } catch (err) {
