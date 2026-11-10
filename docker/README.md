@@ -5,15 +5,23 @@ Dois serviços opcionais que rodam na sua máquina e deixam a extensão mais rá
 | Serviço | Porta | O que faz | Onde configurar na extensão |
 |---|---|---|---|
 | `whisper` (whisper.cpp) | 8080 | Transcrição com Whisper fora do navegador, janela de 15 s | Opções → Motor de transcrição → "Servidor local (Docker)" |
-| `libretranslate` | 5000 | Tradução EN→PT | Opções → Tradução → URL do LibreTranslate |
+| `libretranslate` (opcional, perfil `translate`) | 5000 | Tradução EN→PT | Opções → Tradução → URL do LibreTranslate |
 
 ## Subir
 
 ```bash
 cd docker
-docker compose up -d
-docker compose logs -f whisper      # na primeira vez baixa o modelo (~550 MB no q5_0)
+docker compose up -d                        # só o whisper
+docker compose logs -f whisper              # na primeira vez baixa o modelo (~550 MB no q5_0)
 ```
+
+O LibreTranslate não sobe por padrão: quem já tem um na porta 5000 (erro `Bind for 0.0.0.0:5000 failed: port is already allocated`) continua usando o que já roda. Para subir os dois juntos:
+
+```bash
+docker compose --profile translate up -d
+```
+
+Porta ocupada? Mude no `.env`: `WHISPER_PORT=8081` ou `LT_PORT=5001` (e ajuste a URL nas opções da extensão).
 
 Teste: `curl -s http://localhost:8080/ | head -c 200` deve devolver a página do whisper-server. Na extensão, em Opções → "Testar servidor", ele transcreve 1 s de silêncio e mostra o tempo.
 

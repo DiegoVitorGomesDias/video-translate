@@ -1,12 +1,19 @@
 # Serviços locais do Video Translate: transcrição (whisper.cpp) e tradução (LibreTranslate).
 #
-#   cd docker && docker compose up -d            # CPU
-#   docker compose logs -f whisper               # acompanha o download do modelo (1ª vez)
+#   cd docker && docker compose up -d                        # só o whisper (CPU)
+#   docker compose --profile translate up -d                 # whisper + LibreTranslate
+#   docker compose logs -f whisper                           # acompanha o download do modelo (1ª vez)
+#
+# O LibreTranslate fica atrás do perfil "translate" porque muita gente já tem um na porta
+# 5000 (Bind for 0.0.0.0:5000 failed: port is already allocated). Se for o seu caso, suba só
+# o whisper e aponte a extensão para o LibreTranslate que já roda.
 #
 # Variáveis (opcionais, no ambiente ou num arquivo .env ao lado):
 #   WHISPER_MODEL=large-v3-turbo-q5_0   modelo ggml (large-v3-turbo, large-v3-turbo-q5_0, small.en, base.en...)
 #   WHISPER_AUDIO_CTX=768               janela do encoder: 1500 = 30 s (original), 768 ≈ 15 s (mais rápido)
 #   WHISPER_THREADS=4                   threads de CPU
+#   WHISPER_PORT=8080                   porta do whisper-server no host
+#   LT_PORT=5000                        porta do LibreTranslate no host (perfil translate)
 #
 # GPU: troque a imagem e descomente o bloco correspondente abaixo.
 #   NVIDIA: ghcr.io/ggml-org/whisper.cpp:main-cuda   (precisa do NVIDIA Container Toolkit)
@@ -18,7 +25,7 @@ services:
     container_name: video-translate-whisper
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${WHISPER_PORT:-8080}:8080"
     volumes:
       - whisper-models:/models
     environment:
@@ -52,9 +59,10 @@ services:
   libretranslate:
     image: libretranslate/libretranslate
     container_name: video-translate-libretranslate
+    profiles: ["translate"]
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "${LT_PORT:-5000}:5000"
     command: ["--load-only", "en,pt"]
     volumes:
       - libretranslate-models:/home/libretranslate/.local
