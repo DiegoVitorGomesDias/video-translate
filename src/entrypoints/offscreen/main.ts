@@ -121,6 +121,10 @@ function createProvider(model: SttModelId, engine: SttEngineId = 'local'): Speec
     broadcast(lastStatus);
   };
   provider.onResult = handleResult;
+  // Status imediato, antes de o worker subir, para o viewer já mostrar o que está carregando.
+  const first = engine === 'chrome' ? undefined : candidatesFor(model)[0];
+  lastStatus = { type: 'stt-status', state: 'loading', message: engine === 'chrome' ? 'Iniciando o reconhecimento do Chrome' : `Iniciando ${first?.modelId ?? model}`, progress: 0, model: first?.modelId, device: first?.device };
+  broadcast(lastStatus);
   return provider;
 }
 

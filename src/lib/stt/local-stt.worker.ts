@@ -69,6 +69,7 @@ async function tryLoad(candidate: SttModelCandidate): Promise<AutomaticSpeechRec
   post({ type: 'status', state: 'loading', message: `Carregando ${label}`, progress: 0, model: candidate.modelId, device: candidate.device });
   const started = performance.now();
   const files = new Map<string, { loaded: number; total: number }>();
+  let lastProgressPost = 0;
 
   const pipe = await pipeline('automatic-speech-recognition', candidate.modelId, {
     device: candidate.device,
@@ -87,6 +88,11 @@ async function tryLoad(candidate: SttModelCandidate): Promise<AutomaticSpeechRec
         total += f.total;
       }
       const progress = total > 0 ? (loaded / total) * 100 : (p.progress ?? 0);
+      // Arquivos grandes disparam milhares de callbacks; limita a ~5 mensagens por segundo
+      // (e sempre que um arquivo termina) para não inundar o canal da extensão.
+      const now = performance.now();
+      if (p.status !== 'done' && now - lastProgressPost < 200 && progress < 100) return;
+      lastProgressPost = now;
       post({ type: 'status', state: 'loading', message: `Baixando ${p.file} (${(loaded / 1048576).toFixed(0)} de ${(total / 1048576).toFixed(0)} MB)`, progress, model: candidate.modelId, device: candidate.device });
     },
   });
