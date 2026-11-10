@@ -39,6 +39,7 @@ export interface GetTranscriptsResponse {
   finals: TranscriptEvent[];
   partial: TranscriptEvent | null;
   status: SttStatusEvent | null;
+  applied: AppliedConfig | null;
 }
 
 // ---- Para o background ----
@@ -79,10 +80,17 @@ export type DrawerMessage = DrawerCloseMessage | DrawerPingMessage;
 
 // ---- Eventos (broadcast do offscreen; background e viewer escutam) ----
 
+/** Configuração realmente aplicada na captura em curso. */
+export interface AppliedConfig {
+  sttModel: SttModelId;
+  vadProfile: VadProfileId;
+}
+
 export interface CaptureStatusEvent {
   type: 'capture-status';
   status: 'started' | 'stopped' | 'error';
   error?: string;
+  applied?: AppliedConfig;
 }
 
 export interface SttStatusEvent {

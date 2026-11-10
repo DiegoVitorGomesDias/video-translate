@@ -17,6 +17,9 @@ data class UiState(
     val translatorName: String = "",
     val error: String? = null,
     val level: Float = 0f,
+    /** Configuração aplicada na captura em curso (modelo e separação de frases). */
+    val appliedModel: String = "",
+    val appliedProfile: String = "",
 )
 
 /** Estado compartilhado entre o serviço de captura, a tela principal e o overlay. */

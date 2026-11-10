@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  type AppliedConfig,
   BACKGROUND_TARGET,
   CAPTURE_STATE_KEY,
   OFFSCREEN_TARGET,
@@ -14,6 +15,7 @@ import { SentenceSegmenter, normalize, type Sentence } from '@/lib/segmenter';
 import { watchOptions, type Options } from '@/lib/options';
 import { createTranslator, type LocalOpusStatus, type TranslatorSelection } from '@/lib/translate';
 import { getModelInfo } from '@/lib/stt/models';
+import { VAD_PROFILES } from '@/lib/audio/vad';
 
 interface Card extends Sentence {
   pt?: string;
@@ -39,6 +41,7 @@ export function App() {
   const [chromeDownload, setChromeDownload] = useState<number | null>(null);
   const [stuckToEnd, setStuckToEnd] = useState(true);
   const [translatorRetry, setTranslatorRetry] = useState(0);
+  const [applied, setApplied] = useState<AppliedConfig | null>(null);
   const [localStatus, setLocalStatus] = useState<LocalOpusStatus | null>(null);
 
   const segmenter = useRef(new SentenceSegmenter({ maxChars: 90, maxWaitMs: 5000 }));
@@ -121,7 +124,10 @@ export function App() {
           setStt(ev);
           break;
         case 'capture-status':
-          if (ev.status === 'started') setCaptureStatus('listening');
+          if (ev.status === 'started') {
+            setCaptureStatus('listening');
+            if (ev.applied) setApplied(ev.applied);
+          }
           if (ev.status === 'stopped') setCaptureStatus('stopped');
           if (ev.status === 'error') {
             setCaptureStatus('error');
@@ -140,6 +146,7 @@ export function App() {
         for (const f of res.finals) pushFinal(f);
         if (res.partial) setPartial(normalize(res.partial.text));
         if (res.status) setStt(res.status);
+        if (res.applied) setApplied(res.applied);
         setCaptureStatus((s) => (s === 'starting' ? 'listening' : s));
       })
       .catch(() => {
@@ -253,6 +260,18 @@ export function App() {
     return parts.join('\n');
   }, [translator]);
 
+  // Linha de configuração aplicada (modelo + backend, separação) e aviso se as opções salvas diferem.
+  const configLine = useMemo(() => {
+    const cfg = applied ?? (options ? { sttModel: options.sttModel, vadProfile: options.sentenceSplit } : null);
+    if (!cfg) return null;
+    const model = getModelInfo(cfg.sttModel);
+    const backend = stt?.state === 'ready' ? (stt.device === 'webgpu' ? 'GPU' : 'WASM') : stt?.state === 'loading' ? 'carregando' : null;
+    const vp = VAD_PROFILES[cfg.vadProfile] ?? VAD_PROFILES.normal;
+    const modelLabel = model.label.replace(/\s*\(.*\)$/, '');
+    const changed = !!applied && !!options && (options.sttModel !== applied.sttModel || options.sentenceSplit !== applied.vadProfile);
+    return { model: `${modelLabel}${backend ? ` · ${backend}` : ''}`, split: `Separação: ${vp.label} (${vp.silenceMs / 1000} s / ${vp.maxSegmentMs / 1000} s)`, changed, isApplied: !!applied };
+  }, [applied, options, stt]);
+
   const pendingLine = [segmenter.current.pending, partial].filter(Boolean).join(' ');
 
   return (
@@ -276,6 +295,13 @@ export function App() {
             {captureStatus === 'stopped' ? 'Parado' : 'Parar'}
           </button>
         </div>
+        {configLine && (
+          <div className="config-line" onClick={openOptions} title={configLine.isApplied ? 'Configuração aplicada nesta captura. Clique para abrir as opções.' : 'Configuração salva (ainda sem captura). Clique para abrir as opções.'}>
+            <span className="chip" title="Modelo de transcrição e backend">{configLine.model}</span>
+            <span className="chip" title="Pausa para fechar a frase / duração máxima do trecho">{configLine.split}</span>
+            {configLine.changed && <span className="chip warn">novas opções valem na próxima captura</span>}
+          </div>
+        )}
         {stt?.state === 'loading' && stt.progress !== undefined && (
           <div className="progress">
             <div style={{ width: `${Math.min(100, stt.progress)}%` }} />

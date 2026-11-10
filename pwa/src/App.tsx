@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SentenceSegmenter, normalize, type Sentence } from '@/lib/segmenter';
+import { getModelInfo } from '@/lib/stt/models';
+import { VAD_PROFILES, type VadProfile } from '@/lib/audio/vad';
+import type { SttModelId } from '@/lib/messages';
 import { createTranslator, type LocalOpusStatus, type TranslatorSelection } from '@/lib/translate';
 import type { SpeechProviderStatus, TranscriptResult } from '@/lib/stt/SpeechProvider';
 import { MicCapture, listMicrophones, resolveAsset, type MicDevice } from './capture';
@@ -31,6 +34,7 @@ export function App() {
   const [stuckToEnd, setStuckToEnd] = useState(true);
   const [mic, setMic] = useState<MicDevice | null>(null);
   const [mics, setMics] = useState<MicDevice[]>([]);
+  const [applied, setApplied] = useState<{ sttModel: SttModelId; vadProfile: VadProfile } | null>(null);
 
   const capture = useRef(new MicCapture());
   const segmenter = useRef(new SentenceSegmenter({ maxChars: 90, maxWaitMs: 5000 }));
@@ -105,6 +109,7 @@ export function App() {
   const start = async () => {
     setError(null);
     setStarting(true);
+    setApplied({ sttModel: settings.sttModel, vadProfile: settings.sentenceSplit });
     try {
       await capture.current.start(
         settings.sttModel,
@@ -191,6 +196,15 @@ export function App() {
             ? 'tradução: Google'
             : 'sem tradução';
 
+  const configLine = useMemo(() => {
+    const cfg = applied ?? { sttModel: settings.sttModel, vadProfile: settings.sentenceSplit };
+    const model = getModelInfo(cfg.sttModel);
+    const backend = running && stt?.state === 'ready' ? (stt.device === 'webgpu' ? 'GPU' : 'WASM') : null;
+    const vp = VAD_PROFILES[cfg.vadProfile] ?? VAD_PROFILES.normal;
+    const changed = !!applied && running && (settings.sttModel !== applied.sttModel || settings.sentenceSplit !== applied.vadProfile);
+    return { model: `${model.label.replace(/\s*\(.*\)$/, '')}${backend ? ` · ${backend}` : ''}`, split: `Separação: ${vp.label} (${vp.silenceMs / 1000} s / ${vp.maxSegmentMs / 1000} s)`, changed };
+  }, [applied, settings, stt, running]);
+
   const pendingLine = [segmenter.current.pending, partial].filter(Boolean).join(' ');
 
   return (
@@ -208,6 +222,11 @@ export function App() {
           <button onClick={() => setShowSettings(true)} title="Configurações">
             ⚙
           </button>
+        </div>
+        <div className="config-line" onClick={() => setShowSettings(true)} title="Configuração aplicada. Toque para abrir as configurações.">
+          <span className="chip">{configLine.model}</span>
+          <span className="chip">{configLine.split}</span>
+          {configLine.changed && <span className="chip warn">novas opções valem na próxima captura</span>}
         </div>
         {running && stt?.state === 'loading' && stt.progress !== undefined && (
           <div className="progress">

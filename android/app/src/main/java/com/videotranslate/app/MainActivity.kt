@@ -14,6 +14,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -133,6 +134,16 @@ fun MainScreen() {
             Spacer(Modifier.width(8.dp))
             Text(state.statusText, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
             if (state.translatorName.isNotEmpty()) Text(state.translatorName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        run {
+            val model = state.appliedModel.ifEmpty { settings.sttModel.label.substringBefore(" (") }
+            val profile = state.appliedProfile.ifEmpty { "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s)" }
+            val changed = running && state.appliedModel.isNotEmpty() && (settings.sttModel.label.substringBefore(" (") != state.appliedModel || !state.appliedProfile.startsWith(settings.vadProfile.label))
+            Text(
+                "Modelo: $model · Separação: $profile" + if (changed) "  (novas opções valem na próxima captura)" else "",
+                style = MaterialTheme.typography.labelSmall, color = if (changed) Color(0xFFB26A00) else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp).clickable { showSettings = true },
+            )
         }
         state.progress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) }
         if (state.capture == CaptureState.LISTENING) LinearProgressIndicator(progress = { state.level }, modifier = Modifier.fillMaxWidth().height(3.dp))

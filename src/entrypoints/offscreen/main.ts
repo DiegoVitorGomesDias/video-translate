@@ -4,6 +4,7 @@
 // Os resultados são transmitidos por runtime.sendMessage para o background e o viewer.
 
 import {
+  type AppliedConfig,
   isOffscreenMessage,
   type BroadcastEvent,
   type GetTranscriptsResponse,
@@ -43,6 +44,7 @@ let workletLoaded: Promise<void> | null = null;
 const finals: TranscriptEvent[] = [];
 let lastPartial: TranscriptEvent | null = null;
 let lastStatus: SttStatusEvent | null = null;
+let applied: AppliedConfig | null = null;
 
 const log = (...args: unknown[]) => console.log('[offscreen]', ...args);
 
@@ -116,6 +118,7 @@ async function startCapture(streamId: string, tabId: number, model: SttModelId, 
   log(`iniciando captura da aba ${tabId} (modelo ${model}, separação ${profile})`);
   finals.length = 0;
   lastPartial = null;
+  applied = { sttModel: model, vadProfile: profile };
 
   // 1. Stream da aba a partir do streamId obtido no background.
   const stream = await navigator.mediaDevices.getUserMedia({
@@ -188,7 +191,7 @@ async function startCapture(streamId: string, tabId: number, model: SttModelId, 
 
   if (ctx.state === 'suspended') await ctx.resume();
   log(`áudio ligado: contexto a ${ctx.sampleRate} Hz, som da aba restaurado`);
-  broadcast({ type: 'capture-status', status: 'started' });
+  broadcast({ type: 'capture-status', status: 'started', applied: applied ?? undefined });
 
   // O modelo carrega em paralelo; o áudio já está tocando e sendo segmentado.
   try {
@@ -230,7 +233,7 @@ browser.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
         await stopCapture();
         return { ok: true };
       case 'get-transcripts': {
-        const res: GetTranscriptsResponse = { finals: [...finals], partial: lastPartial, status: lastStatus };
+        const res: GetTranscriptsResponse = { finals: [...finals], partial: lastPartial, status: lastStatus, applied };
         return res;
       }
     }

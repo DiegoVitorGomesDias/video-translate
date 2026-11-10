@@ -67,6 +67,16 @@ while (!done && Date.now() < deadline) await sleep(500);
 if (!done) console.log('TIMEOUT esperando o autoteste');
 ws.close();
 
+// Avalia uma expressão num websocket CDP já aberto.
+function evaluate(expression, awaitPromise, socket, nextId) {
+  return new Promise((resolve) => {
+    const id = nextId();
+    const h = (ev) => { const m = JSON.parse(ev.data); if (m.id === id) { socket.removeEventListener('message', h); resolve(m.result?.result?.value); } };
+    socket.addEventListener('message', h);
+    socket.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, awaitPromise, returnByValue: true } }));
+  });
+}
+
 // Páginas de UI: abre cada uma por alguns segundos e falha se houver exceção ou console.error.
 let uiErrors = 0;
 for (const page of ['viewer.html', 'options.html']) {
@@ -95,6 +105,11 @@ for (const page of ['viewer.html', 'options.html']) {
   });
   console.log(`[${page}] renderizou: ${rendered ? 'sim' : 'NÃO'}; erros: ${pageErrors}`);
   if (!rendered) pageErrors++;
+  if (page === 'viewer.html') {
+    const cfg = await evaluate('document.querySelector(".config-line")?.textContent ?? ""', false, ws2, () => ++n);
+    console.log(`[${page}] linha de configuração: ${cfg}`);
+    if (!/Moonshine tiny/.test(cfg) || !/Normal \(0\.25 s \/ 4 s\)/.test(cfg)) { console.log(`[${page}] linha de configuração FALTANDO/ERRADA`); pageErrors++; }
+  }
   uiErrors += pageErrors;
   ws2.close();
   await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`).catch(() => {});

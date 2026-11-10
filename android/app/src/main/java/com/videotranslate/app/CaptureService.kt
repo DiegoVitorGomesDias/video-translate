@@ -90,8 +90,9 @@ class CaptureService : Service() {
                 startForegroundCompat(useMic)
                 running = true
                 TranscriptRepository.reset()
-                TranscriptRepository.update { it.copy(capture = CaptureState.STARTING, statusText = "Iniciando…") }
                 val settings = Settings.load(this)
+                val profileLabel = "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s)"
+                TranscriptRepository.update { it.copy(capture = CaptureState.STARTING, statusText = "Iniciando…", appliedModel = settings.sttModel.label.substringBefore(" ("), appliedProfile = profileLabel) }
                 if (settings.overlayEnabled && android.provider.Settings.canDrawOverlays(this)) {
                     overlay = OverlayManager(this, settings).also { it.show() }
                 }
@@ -145,7 +146,7 @@ class CaptureService : Service() {
                 recognizer = SherpaRecognizer(downloader.modelDir(settings.sttModel))
             }
             TranscriptRepository.update { it.copy(capture = CaptureState.LISTENING, statusText = "Ouvindo · ${settings.sttModel.label}", progress = null) }
-            overlay?.setStatus("Ouvindo")
+            overlay?.setStatus("Ouvindo · ${settings.sttModel.label.substringBefore(" (")} · ${settings.vadProfile.label}")
 
             // 5. Parciais a cada 1,5 s enquanto há trecho aberto.
             scope.launch {

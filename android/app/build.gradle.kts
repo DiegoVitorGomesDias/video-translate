@@ -7,8 +7,8 @@ plugins {
 }
 
 // Versão do projeto (igual ao package.json da raiz).
-val appVersionName = "0.5.0"
-val appVersionCode = 5
+val appVersionName = "0.5.1"
+val appVersionCode = 6
 
 // sherpa-onnx (STT local) é distribuído como AAR nos releases do GitHub, não no Maven.
 val sherpaVersion = "2.0.1"

@@ -86,10 +86,12 @@ while (Date.now() < deadline) {
   if (en && pt) break;
   if (/^Erro/.test(status)) break;
 }
+const cfg = (await evaluate('document.querySelector(".config-line")?.textContent ?? ""')) ?? '';
+console.log('configuração:', cfg);
 console.log('status:', status);
 console.log('frase EN:', en || '(nenhuma)');
 console.log('frase PT:', pt || '(nenhuma)');
-const ok = /\p{L}{3,}/u.test(en) && /\p{L}{3,}/u.test(pt) && !/falhou/.test(pt) && errors === 0;
+const ok = /\p{L}{3,}/u.test(en) && /\p{L}{3,}/u.test(pt) && !/falhou/.test(pt) && errors === 0 && /Moonshine tiny/.test(cfg) && /Normal/.test(cfg);
 console.log(ok ? 'PWA OK' : `PWA FALHOU (erros de console: ${errors})`);
 ws.close();
 cleanup();
