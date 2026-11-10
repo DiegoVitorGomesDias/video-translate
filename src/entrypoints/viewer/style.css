@@ -50,6 +50,15 @@ body { background: var(--bg); color: var(--fg); }
 .config-line { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; cursor: pointer; }
 .chip { font-size: 11px; color: var(--muted); background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
 .chip.warn { color: var(--warn); border-color: var(--warn); }
+.context-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 5px; }
+.context-label { font-size: 11px; color: var(--muted); cursor: help; }
+.chip.term { color: var(--fg); border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); display: inline-flex; align-items: center; gap: 4px; padding-right: 4px; }
+.chip.term .x { border: none; background: none; color: var(--muted); padding: 0 2px; font-size: 13px; line-height: 1; cursor: pointer; }
+.chip.term .x:hover { color: var(--danger); }
+.chip.muted { opacity: .7; font-style: italic; }
+.chip.add { cursor: pointer; color: var(--accent); background: none; border-style: dashed; }
+.chip.add:hover { border-color: var(--accent); }
+.term-input { font: inherit; font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--accent); background: var(--card); color: var(--fg); width: 140px; }
 .progress { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; margin-top: 6px; }
 .progress > div { height: 100%; background: var(--warn); transition: width .2s; }
 

@@ -171,6 +171,14 @@ async function switchDisplay(mode: DisplayMode): Promise<void> {
   await saveOptions({ ...options, displayMode: mode });
 }
 
+/** Título/URL da aba capturada mudaram (o viewer usa o título como contexto da tradução). */
+async function updateTabTitle(title: string, url: string): Promise<void> {
+  const state = await getState();
+  if (state.tabId === null) return;
+  if (state.tabTitle === title && (!url || state.tabUrl === url)) return;
+  await setState({ ...state, tabTitle: title, tabUrl: url || state.tabUrl });
+}
+
 async function startCapture(tab: chrome.tabs.Tab): Promise<void> {
   if (tab.id === undefined) return;
   // 1. O streamId precisa ser pedido logo após o gesto do usuário (clique no ícone).
@@ -178,7 +186,7 @@ async function startCapture(tab: chrome.tabs.Tab): Promise<void> {
   const options = await loadOptions();
 
   // 2. Mostra o viewer já (drawer na página ou janela), antes de qualquer espera longa.
-  const base: CaptureState = { tabId: tab.id, tabTitle: tab.title ?? '', windowId: null };
+  const base: CaptureState = { tabId: tab.id, tabTitle: tab.title ?? '', tabUrl: tab.url ?? '', windowId: null };
   await setState(base);
   await showViewer(base, options.displayMode);
 
@@ -235,6 +243,9 @@ export default defineBackground(() => {
         case 'switch-display':
           void switchDisplay(msg.mode);
           break;
+        case 'tab-title':
+          void updateTabTitle(msg.title, msg.url);
+          break;
       }
       return;
     }
@@ -256,12 +267,13 @@ export default defineBackground(() => {
   });
 
   // Navegação na aba capturada (recarga ou SPA): reinjeta o drawer quando o documento terminar.
-  browser.tabs.onUpdated.addListener(async (tabId, info) => {
-    if (info.status !== 'complete') return;
+  browser.tabs.onUpdated.addListener(async (tabId, info, tab) => {
     const state = await getState();
-    if (state.tabId === tabId && state.mode === 'drawer') {
-      await openDrawer(tabId);
-    }
+    if (state.tabId !== tabId) return;
+    // Título/URL vêm aqui só quando a extensão ainda tem acesso à aba (activeTab); o
+    // drawer também avisa por mensagem, cobrindo o resto.
+    if (info.title !== undefined || info.url !== undefined) await updateTabTitle(tab.title ?? info.title ?? '', tab.url ?? info.url ?? '');
+    if (info.status === 'complete' && state.mode === 'drawer') await openDrawer(tabId);
   });
 
   // Se a aba capturada fechar, limpa tudo.

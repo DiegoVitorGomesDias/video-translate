@@ -11,6 +11,8 @@ export interface Settings {
   fontSize: number;
   /** deviceId do microfone; '' = automático (prefere o microfone do próprio aparelho). */
   micDeviceId: string;
+  /** Nomes/termos do vídeo a manter na tradução e corrigir na transcrição (um por linha). */
+  glossary: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -21,6 +23,7 @@ export const DEFAULT_SETTINGS: Settings = {
   translationFallback: 'local',
   fontSize: 18,
   micDeviceId: '',
+  glossary: '',
 };
 
 const KEY = 'videoTranslate.settings';
@@ -56,6 +59,7 @@ export function sanitize(input: Partial<Settings> | Record<string, unknown>): Se
     translationFallback: fallbackOk ? s.translationFallback! : 'local',
     fontSize: Number.isFinite(font) && font >= 12 && font <= 32 ? font : 18,
     micDeviceId: typeof s.micDeviceId === 'string' ? s.micDeviceId : '',
+    glossary: typeof s.glossary === 'string' ? s.glossary.slice(0, 2000) : '',
   };
 }
 

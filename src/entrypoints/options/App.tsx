@@ -123,6 +123,7 @@ export function App() {
         sentenceSplit: opts.sentenceSplit,
         translationFallback: opts.translationFallback,
         fontSize: opts.fontSize,
+        glossary: opts.glossary.trim(),
       };
       url = `${PWA_URL}#import=${encodeForUrl(payload)}`;
     }
@@ -190,6 +191,21 @@ export function App() {
         <p className="hint">
           Se a Translator API aparecer como indisponível, confira <code>chrome://on-device-translation-internals</code> e a flag <code>chrome://flags/#translation-api</code> (Chrome 138+ desktop).
         </p>
+      </section>
+
+      <section>
+        <h2>Contexto do vídeo</h2>
+        <label className="model" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input type="checkbox" checked={opts.useTabContext} onChange={(e) => update('useTabContext', e.target.checked)} />
+          <span>Usar o título da aba como contexto (nomes do vídeo)</span>
+        </label>
+        <p className="hint">
+          Nomes tirados do título (ex.: "Prime Video: Dr. House" → <code>Dr. House</code>, <code>House</code>) ficam sem traduzir ("House está atrasado", não "A casa está atrasada") e
+          corrigem a transcrição quando o modelo de fala erra o nome (ex.: "Cutty" → "Cuddy"). A janela de legendas mostra os nomes detectados e deixa remover ou adicionar.
+        </p>
+        <label htmlFor="glossary">Glossário fixo (um termo por linha ou separados por vírgula)</label>
+        <textarea id="glossary" rows={4} value={opts.glossary} onChange={(e) => update('glossary', e.target.value)} placeholder={'Cuddy\nWilson\nForeman'} style={{ width: '100%', font: 'inherit' }} />
+        <p className="hint">Vale em todas as capturas, somado aos nomes do título. Use para personagens, siglas e termos técnicos que devem ficar como estão. Só casa palavra inteira com a mesma capitalização.</p>
       </section>
 
       <section>

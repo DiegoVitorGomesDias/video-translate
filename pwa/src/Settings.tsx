@@ -83,6 +83,10 @@ export function SettingsPanel({ value, onSave, onClose }: { value: Settings; onS
       </select>
       <p className="hint">Com fone Bluetooth ou com fio conectado, o app continua ouvindo pelo microfone do aparelho, que fica perto do som. A lista completa aparece depois da primeira captura (permissão).</p>
 
+      <label htmlFor="glossary">Nomes e termos do vídeo (contexto)</label>
+      <textarea id="glossary" rows={3} value={s.glossary} onChange={(e) => update('glossary', e.target.value)} placeholder={'House, Cuddy, Wilson'} style={{ width: '100%', font: 'inherit' }} />
+      <p className="hint">Um por linha ou separados por vírgula. Ficam sem traduzir ("House" não vira "casa") e corrigem a transcrição quando o modelo erra o nome. No celular não há título de aba, então aqui é manual.</p>
+
       <label htmlFor="fontSize">Tamanho da fonte: {s.fontSize}px</label>
       <input id="fontSize" type="range" min={12} max={32} value={s.fontSize} onChange={(e) => update('fontSize', Number(e.target.value))} />
 

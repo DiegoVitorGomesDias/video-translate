@@ -12,8 +12,10 @@ import {
   type TranscriptEvent,
 } from '@/lib/messages';
 import { SentenceSegmenter, normalize, type Sentence } from '@/lib/segmenter';
-import { watchOptions, type Options } from '@/lib/options';
+import { saveOptions, watchOptions, type Options } from '@/lib/options';
 import { createTranslator, type LocalOpusStatus, type TranslatorSelection } from '@/lib/translate';
+import { ContextualTranslationProvider } from '@/lib/translate/contextual';
+import { correctTranscript, extractTermsFromTitle, mergeTerms, parseGlossary, termPattern } from '@/lib/context';
 import { getModelInfo } from '@/lib/stt/models';
 import { VAD_PROFILES } from '@/lib/audio/vad';
 
@@ -43,10 +45,21 @@ export function App() {
   const [translatorRetry, setTranslatorRetry] = useState(0);
   const [applied, setApplied] = useState<AppliedConfig | null>(null);
   const [localStatus, setLocalStatus] = useState<LocalOpusStatus | null>(null);
+  const [removedTerms, setRemovedTerms] = useState<string[]>([]);
+  const [addingTerm, setAddingTerm] = useState(false);
+  const [newTerm, setNewTerm] = useState('');
 
   const segmenter = useRef(new SentenceSegmenter({ maxChars: 90, maxWaitMs: 5000 }));
   const listRef = useRef<HTMLDivElement>(null);
   const inFlight = useRef(new Set<number>());
+  /** Termos de contexto atuais (lidos pelo tradutor e pela correção da transcrição). */
+  const termsRef = useRef<string[]>([]);
+
+  // ---- Contexto: nomes do título da aba + glossário do usuário ----
+  const autoTerms = useMemo(() => (options?.useTabContext === false ? [] : extractTermsFromTitle(capture.tabTitle ?? '')), [capture.tabTitle, options?.useTabContext]);
+  const manualTerms = useMemo(() => parseGlossary(options?.glossary ?? ''), [options?.glossary]);
+  const terms = useMemo(() => mergeTerms(manualTerms, autoTerms).filter((t) => !removedTerms.includes(t.toLowerCase())), [manualTerms, autoTerms, removedTerms]);
+  termsRef.current = terms;
 
   // ---- Opções (fonte, LibreTranslate) ----
   useEffect(() => watchOptions(setOptions), []);
@@ -78,7 +91,8 @@ export function App() {
       } else {
         setLocalStatus(null);
       }
-      setTranslator(sel);
+      // Mantém os nomes do contexto sem traduzir (ex.: "House" não vira "casa").
+      setTranslator({ ...sel, provider: sel.provider ? new ContextualTranslationProvider(sel.provider, () => termsRef.current) : null });
       // Traduções já feitas continuam; as que falharam serão tentadas de novo.
       setCards((prev) => prev.map((c) => (c.ptError ? { ...c, ptError: undefined } : c)));
     });
@@ -106,7 +120,7 @@ export function App() {
 
   // ---- Transcrições: histórico + eventos ----
   const pushFinal = useCallback((ev: TranscriptEvent) => {
-    const sentences = segmenter.current.push(ev.text, ev.readyAt, ev.reason ?? 'max-length');
+    const sentences = segmenter.current.push(correctTranscript(ev.text, termsRef.current), ev.readyAt, ev.reason ?? 'max-length');
     if (sentences.length) setCards((prev) => [...prev, ...sentences]);
     setPartial((p) => (p && ev.text ? '' : p));
   }, []);
@@ -118,7 +132,7 @@ export function App() {
       switch (ev.type) {
         case 'transcript':
           if (ev.isFinal) pushFinal(ev);
-          else setPartial(normalize(ev.text));
+          else setPartial(normalize(correctTranscript(ev.text, termsRef.current)));
           break;
         case 'stt-status':
           setStt(ev);
@@ -144,7 +158,7 @@ export function App() {
       .then((res: GetTranscriptsResponse | undefined) => {
         if (!res || !('finals' in res)) return;
         for (const f of res.finals) pushFinal(f);
-        if (res.partial) setPartial(normalize(res.partial.text));
+        if (res.partial) setPartial(normalize(correctTranscript(res.partial.text, termsRef.current)));
         if (res.status) setStt(res.status);
         if (res.applied) setApplied(res.applied);
         setCaptureStatus((s) => (s === 'starting' ? 'listening' : s));
@@ -214,6 +228,27 @@ export function App() {
     void browser.runtime
       .sendMessage({ target: BACKGROUND_TARGET, type: 'switch-display', mode: DISPLAY_MODE === 'drawer' ? 'window' : 'drawer' })
       .catch(() => undefined);
+  };
+  /** Refaz a tradução dos cards que contêm o termo (a proteção/remoção passa a valer neles). */
+  const retranslateWith = (term: string) => {
+    const re = termPattern(term, 'u');
+    setCards((prev) => prev.map((c) => (re.test(c.text) ? { ...c, pt: undefined, ptError: undefined } : c)));
+  };
+  const removeTerm = (term: string) => {
+    setRemovedTerms((r) => [...r, term.toLowerCase()]);
+    retranslateWith(term);
+  };
+  const addTerm = () => {
+    const term = newTerm.trim();
+    setNewTerm('');
+    setAddingTerm(false);
+    if (!term || !options) return;
+    setRemovedTerms((r) => r.filter((x) => x !== term.toLowerCase()));
+    if (!manualTerms.some((t) => t.toLowerCase() === term.toLowerCase())) {
+      // Fica no glossário das opções (vale para as próximas capturas também).
+      void saveOptions({ ...options, glossary: options.glossary.trim() ? `${options.glossary.trim()}\n${term}` : term });
+    }
+    retranslateWith(term);
   };
   const prepareChrome = () => {
     const chrome = translator?.chrome;
@@ -302,6 +337,41 @@ export function App() {
             {configLine.changed && <span className="chip warn">novas opções valem na próxima captura</span>}
           </div>
         )}
+        <div className="context-line">
+          <span className="context-label" title="Nomes do título da aba e do glossário: ficam sem traduzir (House não vira casa) e corrigem a transcrição">
+            contexto:
+          </span>
+          {terms.map((t) => (
+            <span className="chip term" key={t} title={manualTerms.some((m) => m.toLowerCase() === t.toLowerCase()) ? 'Do glossário (Opções). Clique no × para ignorar nesta captura.' : `Tirado do título "${capture.tabTitle ?? ''}". Clique no × para ignorar nesta captura.`}>
+              {t}
+              <button className="x" onClick={() => removeTerm(t)} aria-label={`Remover ${t}`}>
+                ×
+              </button>
+            </span>
+          ))}
+          {terms.length === 0 && !addingTerm && <span className="chip muted">nenhum nome no título</span>}
+          {addingTerm ? (
+            <input
+              className="term-input"
+              autoFocus
+              value={newTerm}
+              placeholder="nome ou termo"
+              onChange={(e) => setNewTerm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') addTerm();
+                if (e.key === 'Escape') {
+                  setAddingTerm(false);
+                  setNewTerm('');
+                }
+              }}
+              onBlur={addTerm}
+            />
+          ) : (
+            <button className="chip add" onClick={() => setAddingTerm(true)} title="Adicionar um nome ou termo ao glossário">
+              + nome
+            </button>
+          )}
+        </div>
         {stt?.state === 'loading' && stt.progress !== undefined && (
           <div className="progress">
             <div style={{ width: `${Math.min(100, stt.progress)}%` }} />

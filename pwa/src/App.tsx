@@ -4,6 +4,8 @@ import { getModelInfo } from '@/lib/stt/models';
 import { VAD_PROFILES, type VadProfile } from '@/lib/audio/vad';
 import type { SttModelId } from '@/lib/messages';
 import { createTranslator, type LocalOpusStatus, type TranslatorSelection } from '@/lib/translate';
+import { ContextualTranslationProvider } from '@/lib/translate/contextual';
+import { correctTranscript, mergeTerms, parseGlossary } from '@/lib/context';
 import type { SpeechProviderStatus, TranscriptResult } from '@/lib/stt/SpeechProvider';
 import { MicCapture, listMicrophones, resolveAsset, type MicDevice } from './capture';
 import { SettingsPanel } from './Settings';
@@ -40,6 +42,10 @@ export function App() {
   const segmenter = useRef(new SentenceSegmenter({ maxChars: 90, maxWaitMs: 5000 }));
   const listRef = useRef<HTMLDivElement>(null);
   const inFlight = useRef(new Set<number>());
+  /** Termos do glossário (mantidos na tradução, corrigidos na transcrição). */
+  const terms = useMemo(() => mergeTerms(parseGlossary(settings.glossary)), [settings.glossary]);
+  const termsRef = useRef<string[]>([]);
+  termsRef.current = terms;
 
   useEffect(() => {
     document.documentElement.style.setProperty('--font-size', `${settings.fontSize}px`);
@@ -65,7 +71,7 @@ export function App() {
         sel.local.onStatus = setLocalStatus;
         void sel.local.start().catch(() => undefined);
       } else setLocalStatus(null);
-      setTranslator(sel);
+      setTranslator({ ...sel, provider: sel.provider ? new ContextualTranslationProvider(sel.provider, () => termsRef.current) : null });
       setCards((prev) => prev.map((c) => (c.ptError ? { ...c, ptError: undefined } : c)));
     });
     return () => {
@@ -89,12 +95,13 @@ export function App() {
 
   // ---- Segmentação ----
   const onResult = useCallback((r: TranscriptResult) => {
+    const text = correctTranscript(r.text, termsRef.current);
     if (r.isFinal) {
-      const out = segmenter.current.push(r.text, Date.now(), r.reason ?? 'max-length');
+      const out = segmenter.current.push(text, Date.now(), r.reason ?? 'max-length');
       if (out.length) setCards((prev) => [...prev, ...out]);
       setPartial('');
     } else {
-      setPartial(normalize(r.text));
+      setPartial(normalize(text));
     }
   }, []);
   useEffect(() => {
@@ -227,6 +234,12 @@ export function App() {
           <span className="chip">{configLine.model}</span>
           <span className="chip">{configLine.split}</span>
           {configLine.changed && <span className="chip warn">novas opções valem na próxima captura</span>}
+          {terms.length > 0 && (
+            <span className="chip" title={`Contexto: ${terms.join(', ')} (ficam sem traduzir e corrigem a transcrição)`}>
+              contexto: {terms.slice(0, 4).join(', ')}
+              {terms.length > 4 ? ` +${terms.length - 4}` : ''}
+            </span>
+          )}
         </div>
         {running && stt?.state === 'loading' && stt.progress !== undefined && (
           <div className="progress">

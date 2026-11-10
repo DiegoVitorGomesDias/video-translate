@@ -151,10 +151,32 @@ export default defineContentScript({
     collapseBtn.addEventListener('click', collapse);
     tab.addEventListener('click', expand);
 
+    // ---- Título da página → contexto da tradução (muda em navegação SPA, próximo episódio) ----
+    let lastTitle = '';
+    const sendTitle = () => {
+      const title = document.title.trim();
+      if (!title || title === lastTitle) return;
+      lastTitle = title;
+      browser.runtime.sendMessage({ target: BACKGROUND_TARGET, type: 'tab-title', title, url: location.href }).catch(() => undefined);
+    };
+    const titleObserver = new MutationObserver(sendTitle);
+    const watchTitle = () => {
+      titleObserver.disconnect();
+      const el = document.querySelector('title');
+      if (el) titleObserver.observe(el, { childList: true, characterData: true, subtree: true });
+      // Sites que trocam o <title> inteiro (ou o definem com document.title) sem mutação visível:
+      titleObserver.observe(document.head ?? document.documentElement, { childList: true });
+    };
+    watchTitle();
+    const titleTimer = window.setInterval(sendTitle, 2000);
+    sendTitle();
+
     const remove = () => {
       window.removeEventListener('mousemove', onMove, true);
       window.removeEventListener('mouseup', onUp, true);
       browser.runtime.onMessage.removeListener(onMessage);
+      titleObserver.disconnect();
+      window.clearInterval(titleTimer);
       host.remove();
       delete window.__videoTranslateDrawer;
     };

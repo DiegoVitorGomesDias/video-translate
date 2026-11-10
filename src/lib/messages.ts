@@ -62,7 +62,15 @@ export interface SwitchDisplayMessage {
   mode: DisplayMode;
 }
 
-export type BackgroundMessage = StopCaptureRequestMessage | DrawerClosedMessage | SwitchDisplayMessage;
+/** O drawer avisa que o título da página mudou (navegação SPA no YouTube, próximo episódio). */
+export interface TabTitleMessage {
+  target: typeof BACKGROUND_TARGET;
+  type: 'tab-title';
+  title: string;
+  url: string;
+}
+
+export type BackgroundMessage = StopCaptureRequestMessage | DrawerClosedMessage | SwitchDisplayMessage | TabTitleMessage;
 
 // ---- Para o content script do drawer (via tabs.sendMessage) ----
 
@@ -126,6 +134,7 @@ export type BroadcastEvent = CaptureStatusEvent | SttStatusEvent | TranscriptEve
 export interface CaptureState {
   tabId: number | null;
   tabTitle?: string;
+  tabUrl?: string;
   windowId?: number | null;
   /** Como o viewer está sendo mostrado nesta captura. */
   mode?: DisplayMode;

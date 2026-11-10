@@ -16,6 +16,10 @@ export interface Options {
   fontSize: number;
   /** Painel lateral na própria página (padrão) ou janela separada. */
   displayMode: DisplayMode;
+  /** Tirar nomes do título da aba para usar como contexto (tradução e transcrição). */
+  useTabContext: boolean;
+  /** Glossário fixo do usuário: nomes/termos a manter, um por linha (ou separados por vírgula). */
+  glossary: string;
 }
 
 export const DEFAULT_OPTIONS: Options = {
@@ -26,6 +30,8 @@ export const DEFAULT_OPTIONS: Options = {
   translationFallback: 'local',
   fontSize: 18,
   displayMode: 'drawer',
+  useTabContext: true,
+  glossary: '',
 };
 
 export const OPTIONS_KEY = 'options';

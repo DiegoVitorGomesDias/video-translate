@@ -29,6 +29,8 @@ Ordem, a cada abertura da janela (o cabeçalho mostra qual ficou ativo e, no too
    - **Google Tradutor**: endpoint público não oficial, sem chave, instantâneo. O texto das frases vai para o Google e não há garantia de disponibilidade.
    - **Nenhum**: só o inglês.
 
+**Contexto do vídeo (v0.5.0).** Os tradutores acima não aceitam contexto, então a extensão monta um glossário a partir do título da aba (ex.: "Prime Video: Dr. House" → `Dr. House`, `House`; nomes de sites, temporada/episódio e palavras comuns de títulos em Title Case ficam de fora) somado ao glossário fixo das opções. Cada termo encontrado na frase (palavra inteira, mesma capitalização: "House" sim, "house" não) é trocado por um marcador numérico antes de traduzir e devolvido depois, então "House is late" vira "House está atrasado", não "A casa está atrasada"; se o tradutor estragar um marcador, vale a tradução sem proteção. Os mesmos termos corrigem a transcrição: palavras parecidas (distância de edição pequena, nunca palavras comuns em inglês) viram a grafia do termo ("Cutty" → "Cuddy"). O cabeçalho da janela mostra os nomes detectados, com × para ignorar e "+ nome" para adicionar (vai para o glossário das opções). O título é lido no clique e atualizado pelo painel quando a página muda (YouTube, próximo episódio). `node --experimental-strip-types scripts/selftest-context.mjs` roda o opus-mt real em Node e mostra se os marcadores sobrevivem.
+
 **LibreTranslate local** (melhor controle; nada sai do computador):
 
 ```bash
@@ -176,6 +178,8 @@ video-translate/
 ├── scripts/copy-ort.mjs          # copia o runtime ONNX para public/onnx
 ├── scripts/selftest-chrome.mjs   # autoteste em Chrome headless (modelo + páginas)
 ├── tests/segmenter.test.ts       # testes do segmentador (pnpm test)
+├── tests/context.test.ts         # testes do contexto (título → termos, proteção, correção)
+├── scripts/selftest-context.mjs  # opus-mt real em Node: os marcadores de contexto sobrevivem?
 ├── public/onnx/                  # .mjs/.wasm do onnxruntime-web (gerado, ignorado no git)
 └── src/
     ├── entrypoints/
@@ -183,12 +187,13 @@ video-translate/
     │   ├── offscreen/            # captura, AudioWorklet, VAD, parciais, provedor de STT
     │   ├── drawer.content.ts     # painel lateral (Shadow DOM + iframe do viewer), injetado sob demanda
     │   ├── viewer/               # frases EN + PT (React); roda no painel ou na janela
-    │   ├── options/              # LibreTranslate, modelo, fonte (React)
+    │   ├── options/              # LibreTranslate, contexto/glossário, modelo, fonte (React)
     │   └── pcm-worklet.ts        # gera /pcm-worklet.js para audioWorklet.addModule
     └── lib/
         ├── messages.ts           # tipos das mensagens entre as partes
         ├── options.ts            # chrome.storage.local
         ├── segmenter.ts          # junta finais em frases
+        ├── context.ts            # título da aba → glossário; proteção na tradução; correção da transcrição
         ├── audio/pcm-worklet.ts  # AudioWorkletProcessor: mono 16 kHz
         ├── audio/vad.ts          # VAD por energia (perfis rápida/normal/longa, corte no ponto mais silencioso)
         ├── stt/
@@ -198,6 +203,7 @@ video-translate/
         │   └── local-stt.worker.ts      # Web Worker com @huggingface/transformers
         └── translate/
             ├── TranslationProvider.ts   # interface + cache
+            ├── contextual.ts            # envolve o provedor: mantém os nomes do glossário sem traduzir
             ├── libretranslate.ts
             ├── chrome-translator.ts     # Translator API do Chrome
             ├── google-free.ts           # endpoint público do Google Tradutor

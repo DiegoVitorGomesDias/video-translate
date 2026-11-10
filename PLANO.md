@@ -109,6 +109,8 @@ Como funciona o modo local:
 
 **Atualização (09/11/2026):** a Translator API do Chrome falhou com `NotSupportedError` para EN→PT no Chrome do usuário (Linux), então entrou um terceiro nível, configurável nas opções: **tradução local no navegador** com `Xenova/opus-mt-en-ROMANCE` via transformers.js (~113 MB, padrão; WebGPU com fallback para WASM), **Google Tradutor** por endpoint público não oficial (opcional, envia o texto para fora) ou **nenhum**. Ordem final: LibreTranslate → Chrome → fallback escolhido.
 
+**Atualização (10/11/2026, v0.5.0): contexto.** Nenhum dos tradutores aceita contexto, então ele entra por fora, em `src/lib/context.ts`: o título da aba vira um glossário de nomes (regras conservadoras: nome da obra, sequências com maiúscula, honoríficos; sites, temporada/episódio e palavras comuns em Title Case ficam de fora), somado ao glossário fixo das opções. Na tradução, os termos são trocados por marcadores numéricos (701, 702…) e devolvidos depois ("House" não vira "casa"); na transcrição, palavras parecidas com um termo são corrigidas para a grafia dele ("Cutty" → "Cuddy"), nunca palavras comuns. Tema do vídeo (matemática, música…) não é usado: os modelos frase a frase não têm onde receber isso; a alternativa seria um LLM ou prefixar a frase com o título (testável com `scripts/selftest-context.mjs`). Moonshine não tem prompt de contexto como o Whisper; a correção pós-transcrição cobre os nomes.
+
 Para desenvolvimento e uso local, a instância sobe com um comando:
 
 ```bash
