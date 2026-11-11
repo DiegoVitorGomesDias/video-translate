@@ -14,6 +14,8 @@ export class LibreTranslateProvider implements TranslationProvider {
   private readonly base: string;
   private readonly apiKey: string;
   private readonly timeoutMs: number;
+  /** Alvo efetivo por idioma pedido: "pt" vira "pt-BR" quando a instância oferece (o "pt" do Argos é europeu). */
+  private readonly targets = new Map<string, Promise<string>>();
 
   constructor(opts: LibreTranslateOptions) {
     this.base = opts.url.replace(/\/+$/, '');
@@ -22,7 +24,8 @@ export class LibreTranslateProvider implements TranslationProvider {
   }
 
   async translate(text: string, from: string, to: string): Promise<string> {
-    const body: Record<string, string> = { q: text, source: from, target: to, format: 'text' };
+    const target = await this.resolveTarget(from, to);
+    const body: Record<string, string> = { q: text, source: from, target, format: 'text' };
     if (this.apiKey) body.api_key = this.apiKey;
     const res = await this.fetch('/translate', {
       method: 'POST',
@@ -34,6 +37,26 @@ export class LibreTranslateProvider implements TranslationProvider {
       throw new TranslationError(data.error ?? `HTTP ${res.status}`, this.name);
     }
     return data.translatedText;
+  }
+
+  /** "pt" → "pt-BR" se a instância tiver o modelo brasileiro; senão o próprio código. */
+  private resolveTarget(from: string, to: string): Promise<string> {
+    if (to !== 'pt') return Promise.resolve(to);
+    let cached = this.targets.get(from);
+    if (!cached) {
+      cached = (async () => {
+        try {
+          const res = await this.fetch('/languages', { method: 'GET' });
+          const langs = (await res.json()) as { code: string; targets?: string[] }[];
+          const src = langs.find((l) => l.code === from);
+          return src?.targets?.includes('pt-BR') ? 'pt-BR' : to;
+        } catch {
+          return to;
+        }
+      })();
+      this.targets.set(from, cached);
+    }
+    return cached;
   }
 
   /** Verifica se a instância responde e suporta o par de idiomas. */

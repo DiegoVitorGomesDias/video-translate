@@ -7,6 +7,7 @@
 
 import type { AudioSegment } from '@/lib/audio/vad';
 import type { SpeechProvider, SpeechProviderStatus, TranscriptResult } from './SpeechProvider';
+import { checkRepetition } from './repetition';
 
 export type ServerSpeechFormat = 'whispercpp' | 'openai';
 
@@ -207,10 +208,19 @@ export class ServerSpeechProvider implements SpeechProvider {
         try {
           let text = await requestTranscription(this.cfg, job.audio, job.sampleRate, this.prompt());
           if (this.isEcho(text)) text = '';
+          let rep = checkRepetition(text);
+          if (rep.looped && this.prompt()) {
+            // O contexto do prompt pode ter induzido o laço: tenta de novo sem ele.
+            console.warn(`[server-stt] laço de repetição com prompt no trecho ${job.segmentId}; repetindo sem contexto`);
+            rep = checkRepetition(await requestTranscription(this.cfg, job.audio, job.sampleRate, ''));
+          }
+          if (rep.looped) console.warn(`[server-stt] laço de repetição no trecho ${job.segmentId}; texto colapsado: "${rep.text}"`);
+          text = rep.text;
           const inferenceMs = performance.now() - started;
           if (job.isFinal) {
             this.lastFinalMs = inferenceMs;
-            if (text) {
+            // Um trecho alucinado não entra no prompt do próximo (realimentaria o laço).
+            if (text && !rep.looped) {
               this.recent.push(text);
               while (this.recent.length > RECENT_LIMIT) this.recent.shift();
             }

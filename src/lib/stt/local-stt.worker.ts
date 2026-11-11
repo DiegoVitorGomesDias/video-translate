@@ -11,6 +11,7 @@
 import { pipeline, env, type AutomaticSpeechRecognitionPipeline } from '@huggingface/transformers';
 
 import type { SttModelCandidate } from './models';
+import { checkRepetition, maxNewTokensFor } from './repetition';
 
 export interface TranscribeRequest {
   type: 'transcribe';
@@ -287,6 +288,18 @@ async function pump(): Promise<void> {
   }
 }
 
+/** Roda o modelo, remove o prompt da saída e colapsa repetições. */
+async function decode(audio: Float32Array, opts: Record<string, unknown>, prompt: { ids: number[]; text: string } | null): Promise<{ text: string; looped: boolean }> {
+  const output = await transcriber!(audio, (prompt ? { ...opts, decoder_input_ids: prompt.ids } : opts) as never);
+  let text = (Array.isArray(output) ? output.map((o) => o.text).join(' ') : output.text).trim();
+  if (prompt) {
+    text = stripPrompt(text, prompt.text);
+    if (isEcho(text)) text = '';
+  }
+  const rep = checkRepetition(text);
+  return { text: rep.text, looped: rep.looped };
+}
+
 async function transcribe(req: TranscribeRequest): Promise<void> {
   if (!transcriber) {
     post({ type: 'error', id: req.id, message: 'Modelo ainda não carregado' });
@@ -298,18 +311,23 @@ async function transcribe(req: TranscribeRequest): Promise<void> {
   }
   const started = performance.now();
   try {
+    // Sem limite, um laço de decodificação ("of a bit of a bit...") vai até os 448 tokens
+    // do Whisper; o limite é proporcional à duração do trecho (a pipeline só faz isso
+    // para o Moonshine).
+    const max_new_tokens = maxNewTokensFor(req.audio.length / req.sampleRate);
     const prompt = promptIds();
-    const opts = prompt ? { ...generateOptions, decoder_input_ids: prompt.ids } : generateOptions;
-    const output = await transcriber(req.audio, opts as never);
-    let text = (Array.isArray(output) ? output.map((o) => o.text).join(' ') : output.text).trim();
-    if (prompt) {
-      text = stripPrompt(text, prompt.text);
-      if (isEcho(text)) text = '';
+    let { text, looped } = await decode(req.audio, { ...generateOptions, max_new_tokens }, prompt);
+    if (looped && prompt) {
+      // O contexto do prompt pode ter induzido o laço: tenta de novo sem ele.
+      console.warn(`[stt-worker] laço de repetição com prompt no trecho ${req.segmentId}; repetindo sem contexto`);
+      ({ text, looped } = await decode(req.audio, { ...generateOptions, max_new_tokens }, null));
     }
+    if (looped) console.warn(`[stt-worker] laço de repetição no trecho ${req.segmentId}; texto colapsado: "${text}"`);
     const inferenceMs = performance.now() - started;
     if (req.isFinal) {
       lastFinalInferenceMs = inferenceMs;
-      rememberFinal(text);
+      // Um trecho alucinado não entra no prompt do próximo (realimentaria o laço).
+      if (!looped) rememberFinal(text);
     }
     post({ type: 'result', id: req.id, segmentId: req.segmentId, isFinal: req.isFinal, text, inferenceMs });
   } catch (err) {
