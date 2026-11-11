@@ -23,6 +23,20 @@ docker compose --profile translate up -d
 
 Porta ocupada? Mude no `.env`: `WHISPER_PORT=8081` ou `LT_PORT=5001` (e ajuste a URL nas opções da extensão).
 
+Há um `.env.example` ao lado: `cp .env.example .env` e edite. Comentários depois do valor (`# ...`) são ignorados pelo docker compose.
+
+## Se não subir
+
+`docker ps` mostrando `Restarting (...)` sem portas significa que o `whisper-server` saiu logo ao iniciar. Veja o motivo com:
+
+```bash
+docker compose logs --tail 30 whisper
+```
+
+- `error: unknown argument: ...` seguido do texto de uso: a imagem `:main` mudou as opções do servidor (ele aceita menos flags que o `whisper-cli`). Rode `docker compose pull && docker compose up -d` para pegar o compose atualizado deste repositório.
+- `failed to open '/models/ggml-...bin'`: o download do modelo foi interrompido. Apague o volume (`docker compose down -v`) e suba de novo.
+- A extensão mostra `Failed to fetch` em "Testar servidor": o container não está ouvindo na porta. Confira com `curl -s http://localhost:8080/ | head -c 100`. O whisper-server já responde com `Access-Control-Allow-Origin: *`, então CORS não é o problema.
+
 Teste: `curl -s http://localhost:8080/ | head -c 200` deve devolver a página do whisper-server. Na extensão, em Opções → "Testar servidor", ele transcreve 1 s de silêncio e mostra o tempo.
 
 ## Escolher modelo e janela

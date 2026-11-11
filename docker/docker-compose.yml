@@ -42,7 +42,7 @@ services:
         fi
         echo "[whisper] iniciando whisper-server (audio-ctx=$${WHISPER_AUDIO_CTX}, threads=$${WHISPER_THREADS})"
         exec whisper-server --host 0.0.0.0 --port 8080 \
-          -m "/models/ggml-$${WHISPER_MODEL}.bin" -l en -nc \
+          -m "/models/ggml-$${WHISPER_MODEL}.bin" -l en \
           -t "$${WHISPER_THREADS}" -ac "$${WHISPER_AUDIO_CTX}" -fa
     # --- NVIDIA (imagem main-cuda) ---
     # deploy:
