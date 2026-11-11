@@ -295,9 +295,12 @@ function tuToVoce(text: string): string {
   });
 }
 
+/** Verbos em -ear que no Brasil são -ejar: planear → planejar (planeio, planeia, planeou, planeado, planeamento). */
+const EAR_VERBS = /(?<![\p{L}\p{N}-])(plane)i?(?=[aeo])/giu;
+
 /** Aplica todas as regras. Idempotente para texto já em pt-BR. */
 export function toBrazilian(text: string): string {
-  let t = gerundize(text);
+  let t = gerundize(text).replace(EAR_VERBS, (_, stem: string) => `${stem.slice(0, -1)}ej`);
   t = proclisis(t);
   t = tuToVoce(t);
   for (const r of RULES) t = t.replace(r.re, (m) => keepCase(m, r.to));

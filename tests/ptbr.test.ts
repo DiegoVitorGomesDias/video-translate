@@ -29,3 +29,8 @@ test('pt-BR fica igual', () => {
   assert.equal(toBrazilian('A casa é a mesma.'), 'A casa é a mesma.');
   assert.equal(toBrazilian('Ele vai a pé.'), 'Ele vai a pé.');
 });
+
+test('planear vira planejar', () => {
+  assert.equal(toBrazilian('Ninguém planeia se divorciar. Planeio que o meu marido morra.'), 'Ninguém planeja se divorciar. Planejo que o meu marido morra.');
+  assert.equal(toBrazilian('Ele planeou tudo, sem planeamento. O planeta.'), 'Ele planejou tudo, sem planejamento. O planeta.');
+});
