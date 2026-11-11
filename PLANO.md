@@ -106,6 +106,8 @@ Como funciona o modo local:
 
 **v0.6.7: motor "servidor local".** Para velocidade, o Whisper pode rodar fora do navegador: `docker/docker-compose.yml` sobe o `whisper-server` do whisper.cpp (large-v3-turbo q5_0, `--audio-ctx 768` = janela de ~15 s em vez de 30 s, CPU/CUDA/Vulkan) e o LibreTranslate. `src/lib/stt/server-speech.ts` manda cada trecho do VAD como WAV 16 kHz para `POST /inference` (ou `POST /v1/audio/transcriptions`, formato OpenAI, para Speaches/ScribeCrate/LocalAI), com prompt de glossário + últimas frases, mesma fila com prioridade do worker local e parciais pulados quando o servidor passa de 1 s por final. Indisponível → cai para o modelo local. A janela de 30 s do modelo ONNX no navegador não pode ser reduzida (posições do encoder fixas no export); só o whisper.cpp tem `--audio-ctx`.
 
+**v0.6.8: contexto do prompt não vaza para a janela.** O Whisper devolve o prompt (`<|startofprev|>` + contexto) junto com a transcrição; o worker removia esse prefixo comparando com o texto original, mas o prompt é truncado a 96 tokens e re-tokenizado, então a comparação falhava e o contexto aparecia repetido no viewer. Agora o prefixo a remover é o prompt *decodificado dos mesmos tokens* enviados, com fallback por sufixo. Nos dois motores (local e servidor) um final idêntico a uma das últimas frases é descartado como "eco" do prompt (alucinação típica em ruído/música).
+
 | Opção | Download | WER médio | Streaming | Glossário |
 |---|---|---|---|---|
 | Moonshine tiny | 28 a 110 MB | ~12% | por trechos do VAD | não |

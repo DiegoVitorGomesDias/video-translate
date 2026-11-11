@@ -184,6 +184,13 @@ export class ServerSpeechProvider implements SpeechProvider {
     return best;
   }
 
+  /** O Whisper às vezes "ecoa" o prompt em vez de transcrever (ruído, música): descarta repetições exatas. */
+  private isEcho(text: string): boolean {
+    const norm = (x: string) => x.replace(/[\s.,!?]+/g, '').toLowerCase();
+    const n = norm(text);
+    return n.length > 0 && this.recent.some((f) => norm(f) === n);
+  }
+
   private prompt(): string {
     const parts: string[] = [];
     if (this.terms.length > 0) parts.push(`${this.terms.slice(0, 30).join(', ')}.`);
@@ -198,7 +205,8 @@ export class ServerSpeechProvider implements SpeechProvider {
       for (let job = this.next(); job && this.active; job = this.next()) {
         const started = performance.now();
         try {
-          const text = await requestTranscription(this.cfg, job.audio, job.sampleRate, this.prompt());
+          let text = await requestTranscription(this.cfg, job.audio, job.sampleRate, this.prompt());
+          if (this.isEcho(text)) text = '';
           const inferenceMs = performance.now() - started;
           if (job.isFinal) {
             this.lastFinalMs = inferenceMs;

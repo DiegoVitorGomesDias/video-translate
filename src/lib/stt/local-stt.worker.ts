@@ -161,6 +161,7 @@ async function init(candidate: SttModelCandidate, ortWasmPaths: { mjs: string; w
 
 interface TokenizerLike {
   encode(text: string, opts?: { add_special_tokens?: boolean }): number[];
+  decode(ids: number[], opts?: { skip_special_tokens?: boolean }): string;
   convert_tokens_to_ids(tokens: string[]): number[];
 }
 
@@ -195,14 +196,18 @@ function promptIds(): { ids: number[]; text: string } | null {
   const tok = (transcriber as unknown as { tokenizer: TokenizerLike }).tokenizer;
   let tokens = tok.encode(' ' + text, { add_special_tokens: false });
   if (tokens.length > PROMPT_MAX_TOKENS) tokens = tokens.slice(tokens.length - PROMPT_MAX_TOKENS);
-  return { ids: [prevSotId, ...tokens, ...initTokenIds], text };
+  // O texto a remover da saída é o prompt *decodificado dos mesmos tokens* (pode estar
+  // truncado e com espaços/pontuação diferentes do texto original).
+  return { ids: [prevSotId, ...tokens, ...initTokenIds], text: tok.decode(tokens, { skip_special_tokens: true }) };
 }
 
 /** O texto decodificado inclui o prompt; remove esse prefixo. */
 function stripPrompt(text: string, prompt: string): string {
   const t = text.trim();
   const p = prompt.trim();
-  if (p && t.startsWith(p)) return t.slice(p.length).trim();
+  if (!p) return t;
+  if (t.startsWith(p)) return t.slice(p.length).trim();
+  if (t === p || p.endsWith(t)) return '';
   // Tokenização pode mudar espaços/pontuação: compara sem espaços.
   const norm = (x: string) => x.replace(/\s+/g, '');
   const np = norm(p);
@@ -213,7 +218,23 @@ function stripPrompt(text: string, prompt: string): string {
       if (seen === np.length) return t.slice(i + 1).trim();
     }
   }
+  // Último recurso: a saída começa com o fim do prompt (prefixo parcial > 20 caracteres).
+  for (let n = Math.min(np.length, norm(t).length); n >= 20; n--) {
+    if (norm(t).startsWith(np.slice(np.length - n))) {
+      let seen = 0;
+      for (let i = 0; i < t.length; i++) {
+        if (!/\s/.test(t[i]!)) seen++;
+        if (seen === n) return t.slice(i + 1).trim();
+      }
+    }
+  }
   return t;
+}
+
+/** O Whisper às vezes "ecoa" o prompt em vez de transcrever (ruído, música): descarta repetições exatas. */
+function isEcho(text: string): boolean {
+  const n = text.replace(/[\s.,!?]+/g, '').toLowerCase();
+  return n.length > 0 && recentFinals.some((f) => f.replace(/[\s.,!?]+/g, '').toLowerCase() === n);
 }
 
 function rememberFinal(text: string): void {
@@ -281,7 +302,10 @@ async function transcribe(req: TranscribeRequest): Promise<void> {
     const opts = prompt ? { ...generateOptions, decoder_input_ids: prompt.ids } : generateOptions;
     const output = await transcriber(req.audio, opts as never);
     let text = (Array.isArray(output) ? output.map((o) => o.text).join(' ') : output.text).trim();
-    if (prompt) text = stripPrompt(text, prompt.text);
+    if (prompt) {
+      text = stripPrompt(text, prompt.text);
+      if (isEcho(text)) text = '';
+    }
     const inferenceMs = performance.now() - started;
     if (req.isFinal) {
       lastFinalInferenceMs = inferenceMs;
