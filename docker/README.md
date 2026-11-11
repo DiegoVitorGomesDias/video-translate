@@ -12,7 +12,7 @@ Dois serviços opcionais que rodam na sua máquina e deixam a extensão mais rá
 ```bash
 cd docker
 docker compose up -d                        # só o whisper
-docker compose logs -f whisper              # na primeira vez baixa o modelo (~550 MB no q5_0)
+docker compose logs -f whisper              # na primeira vez baixa o modelo (~470 MB no small.en)
 ```
 
 O LibreTranslate não sobe por padrão: quem já tem um na porta 5000 (erro `Bind for 0.0.0.0:5000 failed: port is already allocated`) continua usando o que já roda. Para subir os dois juntos:
@@ -44,19 +44,29 @@ Teste: `curl -s http://localhost:8080/ | head -c 200` deve devolver a página do
 Crie um arquivo `docker/.env` (ou exporte as variáveis) e rode `docker compose up -d` de novo:
 
 ```
-WHISPER_MODEL=large-v3-turbo-q5_0   # ou large-v3-turbo (mais pesado, um pouco melhor), small.en, base.en
+WHISPER_MODEL=small.en              # em CPU: small.en (padrão) ou base.en (mais rápido); large-v3-turbo-q5_0 só com GPU
 WHISPER_AUDIO_CTX=768               # 1500 = janela original de 30 s; 768 ≈ 15 s (mais rápido); 0 = padrão do modelo
-WHISPER_THREADS=4                   # use o número de núcleos físicos
+WHISPER_THREADS=8                   # use o número de núcleos físicos (não os lógicos)
 ```
+
+Tempo de um trecho de 5 s de fala (`whisper-cli`, só CPU, Ryzen 7 5700X de 8 núcleos, `-ac 768`, sem contar o carregamento do modelo). A transcrição só acompanha a fala se esse tempo ficar bem abaixo da duração do trecho:
+
+| Modelo | 4 threads | 8 threads | Observação |
+|---|---|---|---|
+| `large-v3-turbo-q5_0` | 6,5 s | 3,9 s | mais lento que o próprio áudio: a legenda atrasa e se acumula |
+| `small.en` | — | 0,7 s | padrão; `small.en-q5_1` não é mais rápido (o encoder domina) |
+| `base.en` | — | 0,2 s | erra mais com ruído e nomes; use se a CPU for fraca |
+
+Com `-ac 1500` (janela de 30 s) o tempo dobra. 16 threads num processador de 8 núcleos foi mais lento que 8. O `large-v3-turbo` só vale a pena com GPU (abaixo).
 
 O `--audio-ctx` reduzido é uma otimização do whisper.cpp: o encoder processa menos frames, a resposta chega mais rápido e trechos curtos (os da extensão têm no máximo 6 s) não perdem qualidade perceptível. Para frases muito longas, volte para 1500.
 
 ## GPU
 
-- **NVIDIA:** instale o NVIDIA Container Toolkit, troque a imagem para `ghcr.io/ggml-org/whisper.cpp:main-cuda` e descomente o bloco `deploy:` no `docker-compose.yml`.
+- **NVIDIA:** o driver na máquina não basta; o Docker precisa do [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) (sem ele, `docker info` mostra só o runtime `runc` e a imagem CUDA não enxerga a placa). Depois de instalar e rodar `sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`, troque a imagem para `ghcr.io/ggml-org/whisper.cpp:main-cuda`, descomente o bloco `deploy:` no `docker-compose.yml` e volte para `WHISPER_MODEL=large-v3-turbo-q5_0` no `.env`. Confira com `docker compose logs whisper | grep -i cuda`.
 - **AMD/Intel (Vulkan):** imagem `ghcr.io/ggml-org/whisper.cpp:main-vulkan` e descomente `devices: /dev/dri`.
 
-Se a imagem com GPU não iniciar, volte para `:main` (CPU): com `large-v3-turbo-q5_0`, `-ac 768` e 4 a 8 threads, um trecho de 5 s costuma sair em 1 a 2 s.
+Se a imagem com GPU não iniciar, volte para `:main` (CPU) com `WHISPER_MODEL=small.en`: um trecho de 5 s sai em menos de 1 s com 8 threads.
 
 ## Outros servidores
 
