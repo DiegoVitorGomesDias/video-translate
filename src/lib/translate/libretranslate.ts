@@ -2,6 +2,7 @@
 // Documentação: https://github.com/LibreTranslate/LibreTranslate#api
 
 import { TranslationError, type TranslationProvider } from './TranslationProvider';
+import { toBrazilian } from './ptbr';
 
 export interface LibreTranslateOptions {
   url: string;
@@ -36,7 +37,8 @@ export class LibreTranslateProvider implements TranslationProvider {
     if (!res.ok || typeof data.translatedText !== 'string') {
       throw new TranslationError(data.error ?? `HTTP ${res.status}`, this.name);
     }
-    return data.translatedText;
+    // O modelo "pt" do Argos sai em português europeu; só pt-BR nativo dispensa o ajuste.
+    return target === 'pt-BR' || !to.startsWith('pt') ? data.translatedText : toBrazilian(data.translatedText);
   }
 
   /** "pt" → "pt-BR" se a instância tiver o modelo brasileiro; senão o próprio código. */
