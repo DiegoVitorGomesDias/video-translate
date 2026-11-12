@@ -217,6 +217,7 @@ async function startCapture(tab: chrome.tabs.Tab): Promise<void> {
       sttModel: options.sttModel,
       sttEngine: options.sttEngine,
       vadProfile: options.sentenceSplit,
+      vadSensitivity: options.vadSensitivity,
       context: { tabTitle: tab.title ?? '', useTabContext: options.useTabContext, glossary: options.glossary },
       server: { url: options.sttServerUrl.trim(), format: options.sttServerFormat, model: options.sttServerModel.trim(), apiKey: options.sttServerApiKey.trim() },
     });

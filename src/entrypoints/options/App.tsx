@@ -4,7 +4,7 @@ import { DEFAULT_OPTIONS, loadOptions, originPattern, saveOptions, type Options 
 import { STT_MODELS } from '@/lib/stt/models';
 import { chromeSpeechAvailability, chromeSpeechInstall, type ChromeSpeechAvailability } from '@/lib/stt/chrome-speech';
 import { serverSpeechPing, serverSpeechProbe } from '@/lib/stt/server-speech';
-import { VAD_PROFILES, type VadProfile } from '@/lib/audio/vad';
+import { VAD_PROFILES, VAD_SENSITIVITIES, type VadProfile, type VadSensitivity } from '@/lib/audio/vad';
 import { LibreTranslateProvider, chromeTranslatorBestPair, ChromeTranslatorProvider, LOCAL_MT_DOWNLOAD_MB, LocalOpusProvider, GoogleFreeProvider } from '@/lib/translate';
 import type { SttModelId } from '@/lib/messages';
 
@@ -178,6 +178,7 @@ export function App() {
         libreApiKey: includeKey ? opts.libreApiKey.trim() : '',
         sttModel: opts.sttModel,
         sentenceSplit: opts.sentenceSplit,
+        vadSensitivity: opts.vadSensitivity,
         translationFallback: opts.translationFallback,
         fontSize: opts.fontSize,
         glossary: opts.glossary.trim(),
@@ -365,6 +366,18 @@ export function App() {
           </label>
         ))}
         <p className="hint">Vale na próxima captura. Independente do nível, uma pausa na fala sempre fecha a frase, e frases coladas sem pontuação são separadas por heurística.</p>
+      </section>
+
+      <section>
+        <h2>Sensibilidade do detector de fala</h2>
+        {(Object.keys(VAD_SENSITIVITIES) as VadSensitivity[]).map((id) => (
+          <label key={id} className={`model ${opts.vadSensitivity === id ? 'selected' : ''}`}>
+            <input type="radio" name="vadSensitivity" value={id} checked={opts.vadSensitivity === id} onChange={() => update('vadSensitivity', id)} />
+            <span className="name">{VAD_SENSITIVITIES[id].label}{id === 'normal' ? ' (padrão)' : ''}</span>
+            <div className="desc">{VAD_SENSITIVITIES[id].description}</div>
+          </label>
+        ))}
+        <p className="hint">Vale na próxima captura. Baixa para séries com trilha sonora alta; Alta para falas sussurradas ou pensamentos em off.</p>
       </section>
 
       <section>

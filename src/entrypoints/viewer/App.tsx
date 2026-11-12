@@ -17,7 +17,7 @@ import { createTranslator, type LocalOpusStatus, type TranslatorSelection } from
 import { ContextualTranslationProvider } from '@/lib/translate/contextual';
 import { correctTranscript, extractTermsFromTitle, mergeTerms, parseGlossary, termPattern } from '@/lib/context';
 import { modelLabelFor } from '@/lib/stt/models';
-import { VAD_PROFILES } from '@/lib/audio/vad';
+import { VAD_PROFILES, VAD_SENSITIVITIES } from '@/lib/audio/vad';
 
 interface Card extends Sentence {
   pt?: string;
@@ -300,7 +300,7 @@ export function App() {
 
   // Linha de configuração aplicada (modelo + backend, separação) e aviso se as opções salvas diferem.
   const configLine = useMemo(() => {
-    const cfg = applied ?? (options ? { sttModel: options.sttModel, vadProfile: options.sentenceSplit } : null);
+    const cfg = applied ?? (options ? { sttModel: options.sttModel, vadProfile: options.sentenceSplit, vadSensitivity: options.vadSensitivity } : null);
     if (!cfg) return null;
     const active = cfg.activeEngine ?? cfg.sttEngine ?? 'local';
     const chrome = active === 'chrome';
@@ -308,15 +308,16 @@ export function App() {
     const backend =
       stt?.state === 'ready' ? (stt.device === 'webgpu' ? 'GPU' : stt.device === 'chrome' ? 'nativo' : stt.device === 'server' ? 'Docker' : 'WASM') : stt?.state === 'loading' ? 'carregando' : null;
     const vp = VAD_PROFILES[cfg.vadProfile] ?? VAD_PROFILES.normal;
+    const vs = VAD_SENSITIVITIES[cfg.vadSensitivity ?? 'normal'] ?? VAD_SENSITIVITIES.normal;
     const modelLabel = chrome ? 'Chrome no dispositivo' : server ? `Servidor local (${stt?.model ?? 'whisper'})` : modelLabelFor(stt?.state === 'ready' ? stt.model : undefined, cfg.sttModel);
     const fellBack = (cfg.sttEngine ?? 'local') !== 'local' && cfg.activeEngine === 'local';
     const fellBackLabel = cfg.sttEngine === 'chrome' ? ' (Chrome indisponível)' : ' (servidor indisponível)';
     const vadLabel = chrome ? '' : cfg.vadEngine === 'silero' ? ' · Silero' : cfg.vadEngine === 'energy' ? ' · energia' : '';
     const changed =
-      !!applied && !!options && (options.sttModel !== applied.sttModel || options.sentenceSplit !== applied.vadProfile || options.sttEngine !== (applied.sttEngine ?? 'local'));
+      !!applied && !!options && (options.sttModel !== applied.sttModel || options.sentenceSplit !== applied.vadProfile || options.vadSensitivity !== (applied.vadSensitivity ?? 'normal') || options.sttEngine !== (applied.sttEngine ?? 'local'));
     return {
       model: `${modelLabel}${backend ? ` · ${backend}` : ''}${fellBack ? fellBackLabel : ''}`,
-      split: `Separação: ${vp.label} (${vp.silenceMs / 1000} s / ${vp.maxSegmentMs / 1000} s)${vadLabel}`,
+      split: `Separação: ${vp.label} (${vp.silenceMs / 1000} s / ${vp.maxSegmentMs / 1000} s)${vadLabel} · Sensibilidade: ${vs.label.toLowerCase()}`,
       changed,
       isApplied: !!applied,
     };

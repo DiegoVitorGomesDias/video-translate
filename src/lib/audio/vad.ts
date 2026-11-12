@@ -31,6 +31,41 @@ export const VAD_PROFILES: Record<VadProfile, { silenceMs: number; maxSegmentMs:
   long: { silenceMs: 400, maxSegmentMs: 6000, label: 'Longa', description: 'Pausas de 0,4 s e até 6 s. Frases mais completas, mas falas diferentes podem ficar juntas.' },
 };
 
+/** Sensibilidade do detector: limiares do Silero, ganho automático e fala mínima. */
+export type VadSensitivity = 'low' | 'normal' | 'high';
+export const VAD_SENSITIVITIES: Record<
+  VadSensitivity,
+  { startThreshold: number; endThreshold: number; agcMaxGain: number; minSpeechMs: number; noiseFactor: number; label: string; description: string }
+> = {
+  low: {
+    startThreshold: 0.6,
+    endThreshold: 0.4,
+    agcMaxGain: 1,
+    minSpeechMs: 350,
+    noiseFactor: 4,
+    label: 'Baixa',
+    description: 'Só fala clara, sem ganho automático. Para séries com muita música de fundo: menos frases inventadas, mas sussurros podem ficar de fora.',
+  },
+  normal: {
+    startThreshold: 0.45,
+    endThreshold: 0.3,
+    agcMaxGain: 2,
+    minSpeechMs: 250,
+    noiseFactor: 3,
+    label: 'Normal',
+    description: 'Limiar padrão do Silero com um pouco de ganho automático (até 2x). Equilíbrio para diálogo comum.',
+  },
+  high: {
+    startThreshold: 0.35,
+    endThreshold: 0.2,
+    agcMaxGain: 4,
+    minSpeechMs: 200,
+    noiseFactor: 2,
+    label: 'Alta',
+    description: 'Pega falas baixas, sussurros e pensamentos em off (ganho até 4x). Em cenas só com música pode gerar frases a mais.',
+  },
+};
+
 export interface VadOptions extends SegmentBuilderOptions {
   /** Limiar absoluto mínimo de RMS para considerar fala. */
   minThreshold?: number;
@@ -62,6 +97,10 @@ export interface SegmentBuilderOptions {
   minSpeechMs?: number;
   /** Áudio anterior ao início da fala incluído no trecho (ms). */
   preRollMs?: number;
+  /** Silero: probabilidade para começar a fala (padrão 0,45). */
+  startThreshold?: number;
+  /** Silero: abaixo disso, durante a fala, o bloco conta como silêncio (padrão 0,3). */
+  endThreshold?: number;
 }
 
 /** Junta blocos classificados em trechos (ver cabeçalho do arquivo). */

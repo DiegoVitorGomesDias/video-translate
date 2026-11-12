@@ -1,6 +1,6 @@
 // Configurações do usuário, guardadas em chrome.storage.local.
 
-import type { DisplayMode, SttEngineId, SttModelId, VadProfileId } from './messages';
+import type { DisplayMode, SttEngineId, SttModelId, VadProfileId, VadSensitivityId } from './messages';
 import { DEFAULT_STT_MODEL } from './stt/models';
 
 export interface Options {
@@ -17,6 +17,8 @@ export interface Options {
   sttServerApiKey: string;
   /** Separação de frases: pausa e duração máxima do trecho (ver VAD_PROFILES). */
   sentenceSplit: VadProfileId;
+  /** Sensibilidade do detector de fala (ver VAD_SENSITIVITIES). */
+  vadSensitivity: VadSensitivityId;
   /** Último recurso quando LibreTranslate e Chrome falham. */
   translationFallback: 'local' | 'google' | 'none';
   /** Tamanho da fonte das legendas, em px. */
@@ -39,6 +41,7 @@ export const DEFAULT_OPTIONS: Options = {
   sttServerModel: 'whisper-1',
   sttServerApiKey: '',
   sentenceSplit: 'normal',
+  vadSensitivity: 'normal',
   translationFallback: 'local',
   fontSize: 18,
   displayMode: 'drawer',

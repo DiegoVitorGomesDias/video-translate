@@ -4,11 +4,11 @@
 // o detector por energia sem interromper a captura.
 
 import type { SileroInMessage, SileroOutMessage } from './silero-vad.worker';
-import { EnergyVad, type AudioSegment, type SegmentBuilderOptions, type SpeechSegmenter } from './vad';
+import { EnergyVad, type AudioSegment, type VadOptions, type SpeechSegmenter } from './vad';
 
 export type VadEngine = 'silero' | 'energy';
 
-export interface SileroVadOptions extends SegmentBuilderOptions {
+export interface SileroVadOptions extends VadOptions {
   /** Resolve a URL dos arquivos do runtime ONNX dentro do app/extensão. */
   resolveUrl: (path: string) => string;
 }

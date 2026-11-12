@@ -5,18 +5,17 @@
 
 import { AutoModel, Tensor, env, type PreTrainedModel } from '@huggingface/transformers';
 
-import { SegmentBuilder, type AudioSegment, type SegmentBuilderOptions } from './vad';
+import { SegmentBuilder, type AudioSegment, type VadOptions } from './vad';
 
 export const SILERO_MODEL_ID = 'onnx-community/silero-vad';
 /** Tamanho da janela que o modelo espera a 16 kHz. */
 const FRAME = 512;
-/** Probabilidade para começar a fala (o padrão do Silero é 0,5; falas baixas ficam em 0,3–0,5). */
-const START_THRESHOLD = 0.4;
-/** Abaixo disso, durante a fala, o bloco conta como silêncio (histerese). */
-const END_THRESHOLD = 0.25;
+/** Limiares (ver VAD_SENSITIVITIES em vad.ts); vêm nas opções do init. */
+let startThreshold = 0.45;
+let endThreshold = 0.3;
 
 export type SileroInMessage =
-  | { type: 'init'; options: SegmentBuilderOptions; ortWasmPaths: { mjs: string; wasm: string } }
+  | { type: 'init'; options: VadOptions; ortWasmPaths: { mjs: string; wasm: string } }
   | { type: 'push'; audio: Float32Array }
   | { type: 'peek'; id: number }
   | { type: 'flush' }
@@ -56,10 +55,12 @@ function configureEnv(ortWasmPaths: { mjs: string; wasm: string }): void {
   env.backends.onnx.wasm!.numThreads = 1;
 }
 
-async function init(options: SegmentBuilderOptions, ortWasmPaths: { mjs: string; wasm: string }): Promise<void> {
+async function init(options: VadOptions, ortWasmPaths: { mjs: string; wasm: string }): Promise<void> {
   configureEnv(ortWasmPaths);
   sampleRate = options.sampleRate ?? 16000;
   builder = new SegmentBuilder(options);
+  startThreshold = options.startThreshold ?? startThreshold;
+  endThreshold = options.endThreshold ?? endThreshold;
   builder.onSpeechStart = (segmentId) => post({ type: 'speech-start', segmentId });
   builder.onSegment = (segment) => post({ type: 'segment', segment }, [segment.audio.buffer]);
   builder.onLevel = (level, isSpeech) => post({ type: 'level', level, isSpeech });
@@ -101,7 +102,7 @@ async function process(audio: Float32Array): Promise<void> {
   while (offset + FRAME <= buf.length) {
     const frame = buf.subarray(offset, offset + FRAME);
     const prob = await classify(frame);
-    const threshold = builder.isSpeaking ? END_THRESHOLD : START_THRESHOLD;
+    const threshold = builder.isSpeaking ? endThreshold : startThreshold;
     builder.feed(frame.slice(), prob, prob >= threshold, threshold);
     offset += FRAME;
   }

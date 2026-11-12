@@ -14,12 +14,13 @@ import {
   type SttModelId,
   type SttStatusEvent,
   type VadProfileId,
+  type VadSensitivityId,
   type TranscriptEvent,
 } from '@/lib/messages';
 import { PCM_WORKLET_NAME, TARGET_SAMPLE_RATE } from '@/lib/audio/constants';
 import { SileroVad } from '@/lib/audio/silero-vad';
 import { Agc, normalizePeak } from '@/lib/audio/agc';
-import { VAD_PROFILES } from '@/lib/audio/vad';
+import { VAD_PROFILES, VAD_SENSITIVITIES } from '@/lib/audio/vad';
 import { extractTermsFromTitle, mergeTerms, parseGlossary } from '@/lib/context';
 import { ChromeSpeechProvider } from '@/lib/stt/chrome-speech';
 import { DEFAULT_SERVER_SPEECH, ServerSpeechProvider, type ServerSpeechConfig } from '@/lib/stt/server-speech';
@@ -137,6 +138,7 @@ async function startCapture(
   model: SttModelId,
   engine: SttEngineId,
   profile: VadProfileId,
+  sensitivity: VadSensitivityId,
   initialContext: SpeechContext,
   server: ServerSpeechConfig,
 ): Promise<void> {
@@ -144,10 +146,10 @@ async function startCapture(
     log('já capturando; parando a sessão anterior');
     await stopCapture();
   }
-  log(`iniciando captura da aba ${tabId} (motor ${engine}, modelo ${model}, separação ${profile})`);
+  log(`iniciando captura da aba ${tabId} (motor ${engine}, modelo ${model}, separação ${profile}, sensibilidade ${sensitivity})`);
   finals.length = 0;
   lastPartial = null;
-  applied = { sttModel: model, vadProfile: profile, sttEngine: engine, activeEngine: engine };
+  applied = { sttModel: model, vadProfile: profile, vadSensitivity: sensitivity, sttEngine: engine, activeEngine: engine };
 
   // 1. Stream da aba a partir do streamId obtido no background.
   const stream = await navigator.mediaDevices.getUserMedia({
@@ -178,7 +180,17 @@ async function startCapture(
 
   // 4. VAD (Silero, com reserva por energia) + provedor.
   const vp = VAD_PROFILES[profile] ?? VAD_PROFILES.normal;
-  const vad = new SileroVad({ sampleRate: TARGET_SAMPLE_RATE, silenceMs: vp.silenceMs, maxSegmentMs: vp.maxSegmentMs, resolveUrl });
+  const vs = VAD_SENSITIVITIES[sensitivity] ?? VAD_SENSITIVITIES.normal;
+  const vad = new SileroVad({
+    sampleRate: TARGET_SAMPLE_RATE,
+    silenceMs: vp.silenceMs,
+    maxSegmentMs: vp.maxSegmentMs,
+    minSpeechMs: vs.minSpeechMs,
+    startThreshold: vs.startThreshold,
+    endThreshold: vs.endThreshold,
+    noiseFactor: vs.noiseFactor,
+    resolveUrl,
+  });
   vad.onEngine = (vadEngine, message) => {
     log(`detector de fala: ${vadEngine}${message ? ` (${message})` : ''}`);
     if (applied) {
@@ -226,10 +238,10 @@ async function startCapture(
     lastPartialAt = performance.now(); // primeiro parcial só depois do intervalo
   };
 
-  // Ganho automático (até 4x) antes do detector: sussurros e falas ao fundo de música
-  // ficavam abaixo do limiar do Silero e nem viravam trecho.
-  const agc = new Agc({ sampleRate: TARGET_SAMPLE_RATE, target: 0.5, maxGain: 4 });
-  worklet.port.onmessage = (e: MessageEvent<Float32Array>) => vad.push(agc.process(e.data));
+  // Ganho automático antes do detector (conforme a sensibilidade): sussurros e falas ao
+  // fundo de música ficavam abaixo do limiar do Silero e nem viravam trecho.
+  const agc = vs.agcMaxGain > 1 ? new Agc({ sampleRate: TARGET_SAMPLE_RATE, target: 0.5, maxGain: vs.agcMaxGain }) : null;
+  worklet.port.onmessage = (e: MessageEvent<Float32Array>) => vad.push(agc ? agc.process(e.data) : e.data);
 
   // Glossário (título da aba + opções) para o reconhecimento do Chrome. O offscreen não
   // tem chrome.storage, então o background manda o contexto no início e a cada mudança.
@@ -323,6 +335,7 @@ browser.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
           m.sttModel,
           m.sttEngine ?? 'local',
           m.vadProfile ?? 'normal',
+          m.vadSensitivity ?? 'normal',
           m.context ?? { tabTitle: '', useTabContext: true, glossary: '' },
           { ...DEFAULT_SERVER_SPEECH, ...(m.server ?? {}) },
         );
