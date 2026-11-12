@@ -7,7 +7,7 @@ export const DRAWER_TARGET = 'drawer' as const;
 
 export type DisplayMode = 'drawer' | 'window';
 
-export type SttModelId = 'auto' | 'moonshine-tiny' | 'moonshine-base' | 'whisper-base.en' | 'whisper-large-v3-turbo';
+export type SttModelId = 'auto' | 'moonshine-tiny' | 'moonshine-base' | 'whisper-base.en' | 'whisper-small.en' | 'whisper-large-v3-turbo';
 /** Motor de transcrição: modelo local (transformers.js) ou reconhecimento nativo do Chrome no dispositivo. */
 export type SttEngineId = 'local' | 'chrome' | 'server';
 export type VadEngineId = 'silero' | 'energy';

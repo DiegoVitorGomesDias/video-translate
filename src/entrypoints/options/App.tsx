@@ -351,9 +351,15 @@ export function App() {
             <span className="name">{m.label}</span>
             <div className="desc">
               {m.description} Download: ~{m.downloadMb.webgpu} MB (GPU) ou ~{m.downloadMb.wasm} MB (CPU), só na primeira vez.
+              <br />
+              <strong>Tempo de resposta</strong> (trecho de ~5 s): {m.latency}.
             </div>
+            {m.warning && opts.sttModel === m.id && <div className="warn">{m.warning}</div>}
           </label>
         ))}
+        <p className="hint">
+          Tempos estimados; o real aparece na janela de legendas (latência por trecho). Qualquer modelo Whisper processa uma janela fixa de 30 s, por isso a duração do trecho quase não muda o tempo de resposta.
+        </p>
       </section>
 
       <section>

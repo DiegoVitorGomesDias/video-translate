@@ -108,6 +108,8 @@ Como funciona o modo local:
 
 **v0.6.8: contexto do prompt não vaza para a janela.** O Whisper devolve o prompt (`<|startofprev|>` + contexto) junto com a transcrição; o worker removia esse prefixo comparando com o texto original, mas o prompt é truncado a 96 tokens e re-tokenizado, então a comparação falhava e o contexto aparecia repetido no viewer. Agora o prefixo a remover é o prompt *decodificado dos mesmos tokens* enviados, com fallback por sufixo. Nos dois motores (local e servidor) um final idêntico a uma das últimas frases é descartado como "eco" do prompt (alucinação típica em ruído/música).
 
+**v0.6.14: tempo de resposta e prós/contras na tela de opções; Whisper small.** Cada modelo mostra "Tempo de resposta (trecho de ~5 s)" estimado (campo `latency` em `src/lib/stt/models.ts`) e o turbo exibe um aviso (`warning`) quando selecionado: encoder de 32 camadas sobre janela fixa de 30 s e pesos q4→fp32 em GPU sem shader-f16 dão 5 a 20 s por trecho; a saída rápida é o servidor Docker. Descrições do Moonshine base e do Whisper base passam a listar vantagens e desvantagens um do outro. Novo modelo `whisper-small.en` (onnx-community, q4 na GPU ~300 MB, q8 na CPU ~250 MB) como meio-termo entre base e turbo. Não há ajuste no navegador que acelere o turbo de forma relevante: o custo é o encoder, não a decodificação.
+
 | Opção | Download | WER médio | Streaming | Glossário |
 |---|---|---|---|---|
 | Moonshine tiny | 28 a 110 MB | ~12% | por trechos do VAD | não |
