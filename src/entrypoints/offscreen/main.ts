@@ -18,6 +18,7 @@ import {
 } from '@/lib/messages';
 import { PCM_WORKLET_NAME, TARGET_SAMPLE_RATE } from '@/lib/audio/constants';
 import { SileroVad } from '@/lib/audio/silero-vad';
+import { Agc, normalizePeak } from '@/lib/audio/agc';
 import { VAD_PROFILES } from '@/lib/audio/vad';
 import { extractTermsFromTitle, mergeTerms, parseGlossary } from '@/lib/context';
 import { ChromeSpeechProvider } from '@/lib/stt/chrome-speech';
@@ -201,7 +202,8 @@ async function startCapture(
     if (provider.consumesStream) return;
     pendingSegments++;
     log(`trecho #${seg.id} fechado (${seg.reason}) ${seg.durationMs.toFixed(0)} ms, fila=${pendingSegments}`);
-    provider.transcribe(seg);
+    // Falas baixas: o trecho vai normalizado para o STT (o AGC já ajudou o VAD a pegá-las).
+    provider.transcribe({ ...seg, audio: normalizePeak(seg.audio) });
   };
 
   // Parciais: a cada 1,5 s, se há um trecho aberto com áudio suficiente.
@@ -217,14 +219,17 @@ async function startCapture(
       peeking = false;
       if (!audio || !session) return;
       lastPartialAt = performance.now();
-      provider.transcribePartial(segmentId, audio, TARGET_SAMPLE_RATE);
+      provider.transcribePartial(segmentId, normalizePeak(audio), TARGET_SAMPLE_RATE);
     });
   }, 250);
   vad.onSpeechStart = () => {
     lastPartialAt = performance.now(); // primeiro parcial só depois do intervalo
   };
 
-  worklet.port.onmessage = (e: MessageEvent<Float32Array>) => vad.push(e.data);
+  // Ganho automático (até 4x) antes do detector: sussurros e falas ao fundo de música
+  // ficavam abaixo do limiar do Silero e nem viravam trecho.
+  const agc = new Agc({ sampleRate: TARGET_SAMPLE_RATE, target: 0.5, maxGain: 4 });
+  worklet.port.onmessage = (e: MessageEvent<Float32Array>) => vad.push(agc.process(e.data));
 
   // Glossário (título da aba + opções) para o reconhecimento do Chrome. O offscreen não
   // tem chrome.storage, então o background manda o contexto no início e a cada mudança.

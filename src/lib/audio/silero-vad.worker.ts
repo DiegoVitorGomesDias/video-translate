@@ -10,10 +10,10 @@ import { SegmentBuilder, type AudioSegment, type SegmentBuilderOptions } from '.
 export const SILERO_MODEL_ID = 'onnx-community/silero-vad';
 /** Tamanho da janela que o modelo espera a 16 kHz. */
 const FRAME = 512;
-/** Probabilidade para começar a fala. */
-const START_THRESHOLD = 0.5;
+/** Probabilidade para começar a fala (o padrão do Silero é 0,5; falas baixas ficam em 0,3–0,5). */
+const START_THRESHOLD = 0.4;
 /** Abaixo disso, durante a fala, o bloco conta como silêncio (histerese). */
-const END_THRESHOLD = 0.35;
+const END_THRESHOLD = 0.25;
 
 export type SileroInMessage =
   | { type: 'init'; options: SegmentBuilderOptions; ortWasmPaths: { mjs: string; wasm: string } }
