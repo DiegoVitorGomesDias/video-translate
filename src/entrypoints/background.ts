@@ -5,7 +5,6 @@
 import {
   CAPTURE_STATE_KEY,
   DRAWER_TARGET,
-  SIDEPANEL_PORT,
   OFFSCREEN_TARGET,
   isBackgroundMessage,
   isBroadcastEvent,
@@ -137,8 +136,7 @@ async function closeDrawer(tabId: number): Promise<void> {
 async function openSidePanel(tabId: number): Promise<boolean> {
   try {
     const tab = await browser.tabs.get(tabId);
-    // Painel global (não por aba): assim ele continua aberto ao trocar de aba na janela e
-    // o viewer não é descarregado (o que encerraria a captura pela porta).
+    // Painel global (não por aba): assim ele continua aberto ao trocar de aba na janela.
     await browser.sidePanel.setOptions({ path: SIDEPANEL_PATH, enabled: true });
     await browser.sidePanel.open({ windowId: tab.windowId });
     console.log(`[background] painel lateral aberto na janela ${tab.windowId}`);
@@ -149,9 +147,16 @@ async function openSidePanel(tabId: number): Promise<boolean> {
   }
 }
 
+/** Mantém o painel do Chrome habilitado só quando ele é o modo escolhido (o clique no ícone tenta abri-lo às cegas). */
+async function syncSidePanel(displayMode: DisplayMode): Promise<void> {
+  await browser.sidePanel.setOptions({ path: SIDEPANEL_PATH, enabled: displayMode === 'sidepanel' }).catch(() => undefined);
+}
+
 async function closeSidePanel(): Promise<void> {
-  // Desabilitar o painel fecha o viewer que estiver nele.
+  // Não há sidePanel.close(): desabilitar fecha o viewer que estiver nele; depois volta a
+  // habilitar conforme as opções, para o próximo clique no ícone poder abri-lo.
   await browser.sidePanel.setOptions({ enabled: false }).catch(() => undefined);
+  await syncSidePanel((await loadOptions()).displayMode);
 }
 
 /** Abre a superfície escolhida (painel do Chrome, drawer sobreposto ou janela) para a captura atual. */
@@ -173,6 +178,17 @@ async function showViewer(state: CaptureState, mode: DisplayMode, sidePanelOpene
     }
     console.warn('[background] caindo para a janela separada');
   }
+  // Janela da captura anterior ainda aberta (parou e vai iniciar de novo)? Reaproveita.
+  if (state.lastWindowId != null) {
+    try {
+      await browser.windows.update(state.lastWindowId, { focused: true, drawAttention: true });
+      const next = { ...state, mode: 'window' as const, windowId: state.lastWindowId };
+      await setState(next);
+      return next;
+    } catch {
+      /* já foi fechada */
+    }
+  }
   const windowId = await openViewer();
   const next = { ...state, mode: 'window' as const, windowId };
   await setState(next);
@@ -186,6 +202,11 @@ async function hideViewer(state: CaptureState): Promise<void> {
 }
 
 async function focusViewer(state: CaptureState): Promise<void> {
+  if (state.mode === undefined) {
+    // Capturando sem viewer (a janela foi fechada): abre o da preferência.
+    await showViewer(state, (await loadOptions()).displayMode);
+    return;
+  }
   if (state.mode === 'sidepanel' && state.tabId !== null) {
     // O clique no ícone é um gesto válido: reabre o painel se o usuário o fechou.
     if (!(await openSidePanel(state.tabId))) await showViewer(state, 'drawer');
@@ -241,16 +262,27 @@ async function updateTabTitle(title: string, url: string): Promise<void> {
   }
 }
 
-async function startCapture(tab: chrome.tabs.Tab, options: Options, sidePanelOpened: boolean): Promise<void> {
+/** Onde mostrar o viewer ao começar: abrir conforme as opções, ou usar o viewer que pediu (já aberto). */
+type StartSurface = { kind: 'open'; sidePanelOpened: boolean } | { kind: 'existing'; mode: DisplayMode; windowId?: number };
+
+async function startCapture(tab: chrome.tabs.Tab, options: Options, surface: StartSurface): Promise<void> {
   if (tab.id === undefined) return;
-  const base: CaptureState = { tabId: tab.id, tabTitle: tab.title ?? '', tabUrl: tab.url ?? '', windowId: null };
+  const prev = await getState();
+  const base: CaptureState = {
+    tabId: tab.id,
+    tabTitle: tab.title ?? '',
+    tabUrl: tab.url ?? '',
+    windowId: surface.kind === 'existing' ? (surface.windowId ?? null) : null,
+    mode: surface.kind === 'existing' ? surface.mode : undefined,
+    lastWindowId: prev.lastWindowId ?? null,
+  };
   await setState(base);
 
   // 1. Tudo que depende do gesto do usuário (clique no ícone) vem primeiro: o painel
   //    lateral do Chrome (sidePanel.open) e o streamId da aba.
-  let shown = false;
-  if (options.displayMode === 'sidepanel') {
-    await showViewer(base, 'sidepanel', sidePanelOpened);
+  let shown = surface.kind === 'existing';
+  if (!shown && options.displayMode === 'sidepanel') {
+    await showViewer(base, 'sidepanel', surface.kind === 'open' && surface.sidePanelOpened);
     shown = true;
   }
   const streamId = await browser.tabCapture.getMediaStreamId({ targetTabId: tab.id });
@@ -290,9 +322,58 @@ async function stopCapture(): Promise<void> {
     }
     await browser.offscreen.closeDocument().catch(() => undefined);
   }
-  await setState(EMPTY_STATE);
-  await hideViewer(state);
+  // Os viewers ficam abertos mostrando "Parado" com o botão Iniciar; só o estado é limpo.
+  await setState({ ...EMPTY_STATE, lastTabId: state.tabId, lastWindowId: state.windowId ?? null, lastMode: state.mode });
   console.log('[background] captura encerrada');
+}
+
+/** Encerra a captura e fecha os viewers (botão ✕ do drawer). */
+async function stopCaptureAndClose(): Promise<void> {
+  const state = await getState();
+  await stopCapture();
+  await hideViewer(state);
+  await setState(EMPTY_STATE);
+}
+
+/**
+ * "Iniciar" num viewer já aberto. Escolhe a aba: a que o viewer indicou (painel lateral:
+ * aba ativa da janela), a aba do próprio viewer (drawer), a da captura anterior, ou a aba
+ * ativa da última janela normal. getMediaStreamId não exige gesto, mas exige activeTab ou
+ * permissão de host para a aba.
+ */
+async function startFromViewer(msg: { tabId?: number; from: { mode: DisplayMode; windowId?: number } }, senderTabId: number | undefined): Promise<void> {
+  const state = await getState();
+  if (state.tabId !== null) {
+    await focusViewer(state);
+    return;
+  }
+  const options = await loadOptions();
+  // Páginas da extensão (a própria janela do viewer) não têm URL visível para nós e não podem ser capturadas.
+  const isPage = (t: chrome.tabs.Tab | undefined): t is chrome.tabs.Tab => !!t && t.id !== undefined && /^https?:/.test(t.url ?? '');
+  let tab: chrome.tabs.Tab | undefined;
+  // sender.tab só interessa para o drawer (iframe dentro da aba do vídeo); na janela é a aba do próprio viewer.
+  for (const id of [msg.tabId, msg.from.mode === 'drawer' ? senderTabId : undefined, state.lastTabId ?? undefined]) {
+    if (id == null) continue;
+    const t = await browser.tabs.get(id).catch(() => undefined);
+    if (isPage(t)) {
+      tab = t;
+      break;
+    }
+  }
+  if (!tab) {
+    const wins = await browser.windows.getAll({ windowTypes: ['normal'], populate: true });
+    const win = wins.find((w) => w.focused) ?? wins[0];
+    tab = win?.tabs?.find((t) => t.active && isPage(t));
+  }
+  if (!tab) throw new Error('nenhuma aba com vídeo para capturar');
+  console.log(`[background] iniciar pelo viewer (${msg.from.mode}) na aba ${tab.id}`);
+  try {
+    await startCapture(tab, options, { kind: 'existing', mode: msg.from.mode, windowId: msg.from.windowId });
+  } catch (err) {
+    // activeTab vale só para a aba em que o ícone foi clicado (e até ela navegar).
+    if (String(err).includes('not been invoked')) throw new Error(`a aba "${tab.title ?? tab.url}" precisa ser ativada: clique no ícone da extensão nela`);
+    throw err;
+  }
 }
 
 export default defineBackground(() => {
@@ -300,53 +381,52 @@ export default defineBackground(() => {
 
   // Glossário das opções mudou durante a captura: repassa ao offscreen (que não lê o storage).
   watchOptions((o) => {
+    void syncSidePanel(o.displayMode);
     void (async () => {
       const state = await getState();
       if (state.tabId === null || !(await hasOffscreenDocument())) return;
       sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'set-context', context: { useTabContext: o.useTabContext, glossary: o.glossary } }, 1).catch(() => undefined);
     })();
   });
-  // Clique no ícone. sidePanel.open() exige o gesto do usuário, e o gesto só é garantido
-  // dentro de callbacks das APIs do Chrome (não depois de `await`), então estado e opções
-  // são lidos com callbacks e o painel é aberto antes de qualquer promise.
+  // Clique no ícone. sidePanel.open() exige o gesto do usuário e o gesto se perde em
+  // qualquer await/callback antes dele (v0.7.0 lia estado e opções antes e caía no
+  // painel sobreposto). Então o painel é tentado às cegas, como primeira instrução: ele
+  // só está habilitado (syncSidePanel) quando é o modo escolhido; nos outros modos o
+  // open() falha e seguimos normalmente.
   browser.action.onClicked.addListener((tab) => {
-    const fail = async (err: unknown) => {
-      console.error('[background] erro no clique:', err);
-      await browser.action.setTitle({ title: `Video Translate: erro (${String(err)})` });
-      await stopCapture();
-    };
-    const proceed = (state: CaptureState, options: Options, sidePanelOpened: boolean) => {
-      void (async () => {
-        try {
-          if (state.tabId !== null) {
-            if (sidePanelOpened) return; // já estava capturando; o painel foi reaberto
-            await focusViewer(state);
-          } else {
-            await startCapture(tab, options, sidePanelOpened);
+    const proceed = async (sidePanelOpened: boolean) => {
+      try {
+        const state = await getState();
+        const options = await loadOptions();
+        if (sidePanelOpened && options.displayMode !== 'sidepanel') {
+          // Painel habilitado por engano (opções mudaram sem o service worker ver).
+          await closeSidePanel();
+          sidePanelOpened = false;
+        }
+        if (state.tabId !== null) {
+          if (sidePanelOpened) {
+            if (state.mode !== 'sidepanel') await setState({ ...state, mode: 'sidepanel' });
+            return; // já estava capturando; o painel foi reaberto
           }
-        } catch (err) {
-          await fail(err);
+          await focusViewer(state);
+        } else {
+          await startCapture(tab, options, { kind: 'open', sidePanelOpened });
         }
-      })();
+      } catch (err) {
+        console.error('[background] erro no clique:', err);
+        await browser.action.setTitle({ title: `Video Translate: erro (${String(err)})` });
+        await stopCapture();
+      }
     };
-    chrome.storage.session.get(CAPTURE_STATE_KEY, (data) => {
-      const state = (data?.[CAPTURE_STATE_KEY] as CaptureState | undefined) ?? EMPTY_STATE;
-      chrome.storage.local.get(OPTIONS_KEY, (d) => {
-        const options: Options = { ...DEFAULT_OPTIONS, ...((d?.[OPTIONS_KEY] as Partial<Options> | undefined) ?? {}) };
-        const wantsPanel = state.tabId !== null ? state.mode === 'sidepanel' : options.displayMode === 'sidepanel';
-        if (!wantsPanel || tab.windowId === undefined) {
-          proceed(state, options, false);
-          return;
-        }
-        chrome.sidePanel.setOptions({ path: SIDEPANEL_PATH, enabled: true }, () => {
-          chrome.sidePanel.open({ windowId: tab.windowId as number }, () => {
-            const err = chrome.runtime.lastError;
-            if (err) console.error('[background] sidePanel.open no clique falhou:', err.message);
-            else console.log(`[background] painel lateral aberto na janela ${tab.windowId}`);
-            proceed(state, options, !err);
-          });
-        });
-      });
+    if (tab.windowId === undefined) {
+      void proceed(false);
+      return;
+    }
+    chrome.sidePanel.open({ windowId: tab.windowId }, () => {
+      const err = chrome.runtime.lastError;
+      if (err) console.log('[background] painel lateral não abriu no clique (normal se o modo não for o painel):', err.message);
+      else console.log(`[background] painel lateral aberto na janela ${tab.windowId}`);
+      void proceed(!err);
     });
   });
 
@@ -354,9 +434,22 @@ export default defineBackground(() => {
     if (isBackgroundMessage(msg)) {
       switch (msg.type) {
         case 'stop-capture-request':
-        case 'drawer-closed':
           void stopCapture();
           break;
+        case 'drawer-closed':
+          void stopCaptureAndClose();
+          break;
+        case 'start-capture-request':
+          startFromViewer(msg, _sender.tab?.id).then(
+            () => sendResponse({ ok: true }),
+            (err) => {
+              console.error('[background] falha ao iniciar pelo viewer:', err);
+              browser.runtime.sendMessage({ type: 'capture-status', status: 'error', error: String(err) }).catch(() => undefined);
+              void stopCapture();
+              sendResponse({ ok: false, error: String(err) });
+            },
+          );
+          return true; // resposta assíncrona
         case 'switch-display':
           switchDisplay(msg.mode, msg.sidePanelOpened === true).then(
             () => sendResponse({ ok: true }),
@@ -384,9 +477,11 @@ export default defineBackground(() => {
   });
 
   // Fechar a janela do viewer para a captura.
+  // Fechar a janela do viewer não para a captura (o selo REC fica; o clique no ícone reabre).
   browser.windows.onRemoved.addListener(async (windowId) => {
     const state = await getState();
-    if (state.windowId === windowId) await stopCapture();
+    if (state.windowId === windowId) await setState({ ...state, windowId: null, mode: state.mode === 'window' ? undefined : state.mode });
+    else if (state.lastWindowId === windowId) await setState({ ...state, lastWindowId: null });
   });
 
   // Navegação na aba capturada (recarga ou SPA): reinjeta o drawer quando o documento terminar.
@@ -405,30 +500,17 @@ export default defineBackground(() => {
     if (state.tabId === tabId) await stopCapture();
   });
 
-  // Viewer no painel lateral do Chrome: a porta cai quando o usuário fecha o painel.
-  browser.runtime.onConnect.addListener((port) => {
-    if (port.name !== SIDEPANEL_PORT) return;
-    port.onDisconnect.addListener(async () => {
-      const state = await getState();
-      if (state.tabId !== null && state.mode === 'sidepanel') {
-        console.log('[background] painel lateral fechado pelo usuário; encerrando a captura');
-        await stopCapture();
-      }
-    });
-  });
-
   browser.runtime.onInstalled.addListener(async (details) => {
     await setState(EMPTY_STATE);
-    await closeSidePanel();
     // v0.7.0: o painel sobreposto ("drawer") deixou de ser o padrão; quem estava nele passa
     // para o painel lateral do Chrome, que empurra a página em vez de cobrir o vídeo.
     if (details.reason === 'update' && details.previousVersion && details.previousVersion < '0.7.0') {
       const options = await loadOptions();
       if (options.displayMode === 'drawer') await saveOptions({ ...options, displayMode: 'sidepanel' });
     }
+    await syncSidePanel((await loadOptions()).displayMode);
   });
   browser.runtime.onStartup.addListener(async () => {
     await setState(EMPTY_STATE);
-    await closeSidePanel();
   });
 });

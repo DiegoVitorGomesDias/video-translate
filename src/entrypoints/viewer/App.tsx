@@ -10,7 +10,6 @@ import {
   type GetTranscriptsResponse,
   type SttStatusEvent,
   type TranscriptEvent,
-  SIDEPANEL_PORT,
   type DisplayMode,
 } from '@/lib/messages';
 import { SentenceSegmenter, normalize, type Sentence } from '@/lib/segmenter';
@@ -69,33 +68,6 @@ export function App() {
   // ---- Opções (fonte, LibreTranslate) ----
   useEffect(() => watchOptions(setOptions), []);
 
-  // No painel lateral do Chrome não há evento de "painel fechado": mantém uma porta aberta
-  // com o background, que trata a desconexão como fechamento (e reconecta se o service
-  // worker reiniciar).
-  useEffect(() => {
-    if (DISPLAY_MODE !== 'sidepanel') return;
-    let port: chrome.runtime.Port | null = null;
-    let timer = 0;
-    let stopped = false;
-    const connect = () => {
-      if (stopped) return;
-      try {
-        port = browser.runtime.connect({ name: SIDEPANEL_PORT });
-        port.onDisconnect.addListener(() => {
-          port = null;
-          if (!stopped) timer = window.setTimeout(connect, 1000);
-        });
-      } catch {
-        timer = window.setTimeout(connect, 2000);
-      }
-    };
-    connect();
-    return () => {
-      stopped = true;
-      window.clearTimeout(timer);
-      port?.disconnect();
-    };
-  }, []);
   useEffect(() => {
     if (options) document.documentElement.style.setProperty('--font-size', `${options.fontSize}px`);
   }, [options?.fontSize]);
@@ -139,6 +111,8 @@ export function App() {
     void browser.storage.session.get(CAPTURE_STATE_KEY).then((d) => {
       const s = d[CAPTURE_STATE_KEY] as CaptureState | undefined;
       if (s) setCapture(s);
+      // Aberto sem captura (ex.: pelo menu de painéis do Chrome, ou depois de parar): mostra "Iniciar".
+      if (!s || s.tabId === null) setCaptureStatus((st) => (st === 'error' ? st : 'stopped'));
     });
     const listener = (changes: Record<string, { newValue?: unknown }>, area: string) => {
       if (area === 'session' && changes[CAPTURE_STATE_KEY]) {
@@ -255,6 +229,38 @@ export function App() {
   // ---- Ações ----
   const stop = () => {
     void browser.runtime.sendMessage({ target: BACKGROUND_TARGET, type: 'stop-capture-request' }).catch(() => undefined);
+  };
+  /** (Re)começa a captura a partir deste viewer, sem abrir outro. */
+  const start = () => {
+    setCaptureStatus('starting');
+    setCaptureError(null);
+    void (async () => {
+      let tabId: number | undefined;
+      let windowId: number | undefined;
+      try {
+        if (DISPLAY_MODE === 'sidepanel') {
+          // Aba ativa da janela em que o painel está.
+          const [t] = await browser.tabs.query({ active: true, currentWindow: true });
+          if (t && !(t.url ?? '').startsWith('chrome-extension://')) tabId = t.id;
+        } else if (DISPLAY_MODE === 'window') {
+          windowId = (await browser.windows.getCurrent()).id;
+        }
+      } catch {
+        /* o background escolhe a aba */
+      }
+      try {
+        const res = (await browser.runtime.sendMessage({ target: BACKGROUND_TARGET, type: 'start-capture-request', tabId, from: { mode: DISPLAY_MODE, windowId } })) as
+          | { ok?: boolean; error?: string }
+          | undefined;
+        if (res && res.ok === false) {
+          setCaptureStatus('error');
+          setCaptureError(res.error ?? 'não foi possível iniciar');
+        }
+      } catch (err) {
+        setCaptureStatus('error');
+        setCaptureError(String(err));
+      }
+    })();
   };
   const openOptions = () => void browser.runtime.openOptionsPage();
   // Da janela, "voltar para o painel" usa o painel escolhido nas opções (Chrome ou sobreposto).
@@ -407,9 +413,15 @@ export function App() {
           <button className="link" onClick={switchDisplay} disabled={captureStatus === 'stopped'} title={DISPLAY_MODE !== 'window' ? 'Abrir numa janela separada' : 'Voltar para o painel ao lado do vídeo'}>
             {DISPLAY_MODE !== 'window' ? 'abrir em janela' : 'voltar para o painel'}
           </button>
-          <button className="danger" onClick={stop} disabled={captureStatus === 'stopped'}>
-            {captureStatus === 'stopped' ? 'Parado' : 'Parar'}
-          </button>
+          {captureStatus === 'stopped' || captureStatus === 'error' ? (
+            <button className="start" onClick={start} title="Começar a transcrever a aba com o vídeo">
+              Iniciar
+            </button>
+          ) : (
+            <button className="danger" onClick={stop} title="Parar a transcrição (o painel continua aberto)">
+              Parar
+            </button>
+          )}
         </div>
         {configLine && (
           <div className="config-line" onClick={openOptions} title={configLine.isApplied ? 'Configuração aplicada nesta captura. Clique para abrir as opções.' : 'Configuração salva (ainda sem captura). Clique para abrir as opções.'}>

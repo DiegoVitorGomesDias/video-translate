@@ -7,8 +7,6 @@ export const DRAWER_TARGET = 'drawer' as const;
 
 /** sidepanel = painel lateral do Chrome (empurra a página); drawer = sobreposto à página; window = janela. */
 export type DisplayMode = 'sidepanel' | 'drawer' | 'window';
-/** Nome da porta que o viewer no painel lateral mantém aberta (fechar o painel encerra a captura). */
-export const SIDEPANEL_PORT = 'viewer-sidepanel' as const;
 
 export type SttModelId = 'auto' | 'moonshine-tiny' | 'moonshine-base' | 'whisper-base.en' | 'whisper-small.en' | 'whisper-large-v3-turbo';
 /** Motor de transcrição: modelo local (transformers.js) ou reconhecimento nativo do Chrome no dispositivo. */
@@ -76,6 +74,16 @@ export interface StopCaptureRequestMessage {
   type: 'stop-capture-request';
 }
 
+/** O viewer (já aberto) pede para (re)começar a captura. */
+export interface StartCaptureRequestMessage {
+  target: typeof BACKGROUND_TARGET;
+  type: 'start-capture-request';
+  /** Aba a capturar, quando o viewer sabe (painel lateral: aba ativa da janela). */
+  tabId?: number;
+  /** Onde o viewer que pediu está, para o background não abrir outro. */
+  from: { mode: DisplayMode; windowId?: number };
+}
+
 /** O drawer foi fechado pelo usuário (botão X). */
 export interface DrawerClosedMessage {
   target: typeof BACKGROUND_TARGET;
@@ -99,7 +107,7 @@ export interface TabTitleMessage {
   url: string;
 }
 
-export type BackgroundMessage = StopCaptureRequestMessage | DrawerClosedMessage | SwitchDisplayMessage | TabTitleMessage;
+export type BackgroundMessage = StopCaptureRequestMessage | StartCaptureRequestMessage | DrawerClosedMessage | SwitchDisplayMessage | TabTitleMessage;
 
 // ---- Para o content script do drawer (via tabs.sendMessage) ----
 
@@ -171,8 +179,12 @@ export interface CaptureState {
   tabTitle?: string;
   tabUrl?: string;
   windowId?: number | null;
-  /** Como o viewer está sendo mostrado nesta captura. */
+  /** Como o viewer está sendo mostrado nesta captura (undefined = nenhum viewer aberto). */
   mode?: DisplayMode;
+  /** Da última captura (parada): para "Iniciar" de novo no mesmo lugar sem abrir outro viewer. */
+  lastTabId?: number | null;
+  lastWindowId?: number | null;
+  lastMode?: DisplayMode;
 }
 
 export const CAPTURE_STATE_KEY = 'captureState';
