@@ -10,6 +10,34 @@ const KEEP_REPEATS = 2;
 
 const normWord = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
 
+/** Caractere (ou grupo de até 3) repetido pelo menos tantas vezes seguidas é saída degenerada. */
+const CHAR_RUN_MIN = 6;
+/** Palavra que, depois de colapsar os runs, ainda é só isso e tinha pelo menos este tamanho é descartada. */
+const SCREAM_MIN_LEN = 10;
+
+/**
+ * Gritos e ruído viram "HHHHHHHHHH..." ou "AHAHAHAHAH..." sem espaços (centenas de
+ * caracteres, estouram a largura do card e viram lixo na tradução). Runs de um mesmo
+ * caractere ou grupo curto são reduzidos a 3; a palavra é descartada se não sobrar
+ * nada além do run.
+ */
+export function collapseCharRuns(text: string): string {
+  return text
+    .split(/(\s+)/)
+    .map((part) => {
+      if (!part || /^\s+$/.test(part)) return part;
+      const collapsed = part.replace(/([^\d\s]{1,3}?)\1{5,}/gu, (run, unit: string) => (run.length >= CHAR_RUN_MIN ? unit.repeat(3) : run));
+      if (collapsed === part) return part;
+      // Só restou o run (e pontuação)? Era grito/ruído: some.
+      const core = collapsed.replace(/[^\p{L}\p{N}]/gu, '');
+      const degenerate = part.length >= SCREAM_MIN_LEN && /^([^\d]{1,3}?)\1*$/u.test(core);
+      return degenerate ? '' : collapsed;
+    })
+    .join('')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 /**
  * Colapsa runs de um mesmo n-grama (1 a 8 palavras) repetido 3+ vezes seguidas,
  * mantendo as duas primeiras ocorrências. Comparação ignora caixa e pontuação.
@@ -67,10 +95,11 @@ const LOOP_REMOVED = 0.5;
 
 export function checkRepetition(text: string): RepetitionCheck {
   const original = text.split(/\s+/).filter(Boolean).length;
-  const collapsed = collapseRepetitions(text);
+  const collapsed = collapseRepetitions(collapseCharRuns(text));
   const kept = collapsed.split(/\s+/).filter(Boolean).length;
   const removed = original > 0 ? 1 - kept / original : 0;
-  return { text: collapsed, removed, looped: original >= LOOP_MIN_WORDS && removed >= LOOP_REMOVED };
+  const screamed = original > 0 && kept === 0;
+  return { text: collapsed, removed, looped: screamed || (original >= LOOP_MIN_WORDS && removed >= LOOP_REMOVED) };
 }
 
 /**

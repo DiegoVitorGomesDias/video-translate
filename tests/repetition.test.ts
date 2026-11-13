@@ -1,6 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { collapseRepetitions, checkRepetition, maxNewTokensFor } from '../src/lib/stt/repetition.ts';
+import { collapseCharRuns, collapseRepetitions, checkRepetition, maxNewTokensFor } from '../src/lib/stt/repetition.ts';
+
+test('grito "HHHHHH..." some e o trecho é marcado como alucinação', () => {
+  const r = checkRepetition('H'.repeat(300));
+  assert.equal(r.text, '');
+  assert.ok(r.looped);
+});
+
+test('run de caracteres no meio da frase é reduzido; "AHAHAHAH" longo some', () => {
+  assert.equal(collapseCharRuns('Nooooooooooo! Stop.'), 'Nooo! Stop.');
+  assert.equal(collapseCharRuns('He said ' + 'AH'.repeat(40) + ' and left'), 'He said and left');
+  assert.equal(collapseCharRuns('Well... yes'), 'Well... yes');
+  assert.equal(collapseCharRuns('Mississippi 1000000'), 'Mississippi 1000000');
+});
+
 
 test('laço de 3 palavras é colapsado e marcado como alucinação', () => {
   const loop = 'I\'m going to do a little bit of a little bit ' + 'of a bit '.repeat(80) + 'of a bit of';

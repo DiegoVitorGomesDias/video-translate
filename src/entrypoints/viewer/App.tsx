@@ -18,6 +18,7 @@ import { createTranslator, type LocalOpusStatus, type TranslatorSelection } from
 import { ContextualTranslationProvider } from '@/lib/translate/contextual';
 import { correctTranscript, extractTermsFromTitle, mergeTerms, parseGlossary, termPattern } from '@/lib/context';
 import { modelLabelFor } from '@/lib/stt/models';
+import { collapseCharRuns } from '@/lib/stt/repetition';
 import { VAD_PROFILES, VAD_SENSITIVITIES } from '@/lib/audio/vad';
 
 interface Card extends Sentence {
@@ -127,7 +128,10 @@ export function App() {
 
   // ---- Transcrições: histórico + eventos ----
   const pushFinal = useCallback((ev: TranscriptEvent) => {
-    const sentences = segmenter.current.push(correctTranscript(ev.text, termsRef.current), ev.readyAt, ev.reason ?? 'max-length');
+    // Vale para todos os motores (o worker/servidor já filtram; o Chrome nativo não).
+    const text = collapseCharRuns(ev.text);
+    if (!text) return;
+    const sentences = segmenter.current.push(correctTranscript(text, termsRef.current), ev.readyAt, ev.reason ?? 'max-length');
     if (sentences.length) setCards((prev) => [...prev, ...sentences]);
     setPartial((p) => (p && ev.text ? '' : p));
   }, []);

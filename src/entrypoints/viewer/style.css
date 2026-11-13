@@ -86,15 +86,15 @@ button.link { border: none; background: none; padding: 0; color: var(--accent); 
   background: var(--card); border: 1px solid var(--border); border-radius: 10px;
   padding: 10px 12px; margin-bottom: 10px;
 }
-.card .en { font-size: var(--font-size); line-height: 1.35; }
-.card .pt { font-size: calc(var(--font-size) * 0.95); line-height: 1.35; color: var(--muted); margin-top: 6px; }
+/* overflow-wrap: palavra sem espaços (ex.: "HHHHHH…" de um grito) quebra em vez de estourar o card. */
+.card .en { font-size: var(--font-size); line-height: 1.35; overflow-wrap: anywhere; }
+.card .pt { font-size: calc(var(--font-size) * 0.95); line-height: 1.35; color: var(--muted); margin-top: 6px; overflow-wrap: anywhere; }
 .card .pt.error { color: var(--danger); font-size: 12.5px; }
 .card .pt.pending { opacity: .7; }
 
 .partial {
   font-size: var(--font-size); line-height: 1.35; color: var(--muted); font-style: italic;
-  padding: 4px 2px 10px; min-height: 1.4em;
-}
+  padding: 4px 2px 10px; min-height: 1.4em; overflow-wrap: anywhere; }
 
 .to-end {
   position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
