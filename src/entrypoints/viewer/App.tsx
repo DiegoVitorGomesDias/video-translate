@@ -263,6 +263,12 @@ export function App() {
     })();
   };
   const openOptions = () => void browser.runtime.openOptionsPage();
+  /** A−/A+ no cabeçalho: mesma opção fontSize das configurações (12–32 px), salva para as próximas vezes. */
+  const changeFontSize = (delta: number) => {
+    if (!options) return;
+    const next = Math.min(32, Math.max(12, options.fontSize + delta));
+    if (next !== options.fontSize) void saveOptions({ ...options, fontSize: next });
+  };
   // Da janela, "voltar para o painel" usa o painel escolhido nas opções (Chrome ou sobreposto).
   const panelMode: DisplayMode = options?.displayMode === 'drawer' ? 'drawer' : 'sidepanel';
   const switchDisplay = () => {
@@ -406,6 +412,14 @@ export function App() {
           <span className={`dot ${status.kind}`} />
           <span className="grow" title={status.detail ?? ''}>
             {status.text}
+          </span>
+          <span className="font-size" title={`Tamanho da fonte das legendas: ${options?.fontSize ?? 18}px`}>
+            <button className="icon" onClick={() => changeFontSize(-2)} disabled={!options || options.fontSize <= 12} aria-label="Diminuir a fonte">
+              A−
+            </button>
+            <button className="icon" onClick={() => changeFontSize(2)} disabled={!options || options.fontSize >= 32} aria-label="Aumentar a fonte">
+              A+
+            </button>
           </span>
           <button className="link" onClick={openOptions} title={translatorDetail || translatorLabel}>
             {translatorLabel}
