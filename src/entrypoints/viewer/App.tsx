@@ -10,6 +10,8 @@ import {
   type GetTranscriptsResponse,
   type SttStatusEvent,
   type TranscriptEvent,
+  SIDEPANEL_PORT,
+  type DisplayMode,
 } from '@/lib/messages';
 import { SentenceSegmenter, normalize, type Sentence } from '@/lib/segmenter';
 import { saveOptions, watchOptions, type Options } from '@/lib/options';
@@ -27,7 +29,10 @@ interface Card extends Sentence {
 type CaptureStatus = 'starting' | 'listening' | 'stopped' | 'error';
 
 const VERSION = browser.runtime.getManifest().version;
-const DISPLAY_MODE: 'drawer' | 'window' = new URLSearchParams(location.search).get('mode') === 'drawer' ? 'drawer' : 'window';
+const DISPLAY_MODE: DisplayMode = (() => {
+  const m = new URLSearchParams(location.search).get('mode');
+  return m === 'drawer' || m === 'sidepanel' ? m : 'window';
+})();
 const FROM = 'en';
 const TO = 'pt';
 
@@ -63,6 +68,34 @@ export function App() {
 
   // ---- Opções (fonte, LibreTranslate) ----
   useEffect(() => watchOptions(setOptions), []);
+
+  // No painel lateral do Chrome não há evento de "painel fechado": mantém uma porta aberta
+  // com o background, que trata a desconexão como fechamento (e reconecta se o service
+  // worker reiniciar).
+  useEffect(() => {
+    if (DISPLAY_MODE !== 'sidepanel') return;
+    let port: chrome.runtime.Port | null = null;
+    let timer = 0;
+    let stopped = false;
+    const connect = () => {
+      if (stopped) return;
+      try {
+        port = browser.runtime.connect({ name: SIDEPANEL_PORT });
+        port.onDisconnect.addListener(() => {
+          port = null;
+          if (!stopped) timer = window.setTimeout(connect, 1000);
+        });
+      } catch {
+        timer = window.setTimeout(connect, 2000);
+      }
+    };
+    connect();
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      port?.disconnect();
+    };
+  }, []);
   useEffect(() => {
     if (options) document.documentElement.style.setProperty('--font-size', `${options.fontSize}px`);
   }, [options?.fontSize]);
@@ -224,13 +257,45 @@ export function App() {
     void browser.runtime.sendMessage({ target: BACKGROUND_TARGET, type: 'stop-capture-request' }).catch(() => undefined);
   };
   const openOptions = () => void browser.runtime.openOptionsPage();
+  // Da janela, "voltar para o painel" usa o painel escolhido nas opções (Chrome ou sobreposto).
+  const panelMode: DisplayMode = options?.displayMode === 'drawer' ? 'drawer' : 'sidepanel';
   const switchDisplay = () => {
-    void browser.runtime
-      .sendMessage({ target: BACKGROUND_TARGET, type: 'switch-display', mode: DISPLAY_MODE === 'drawer' ? 'window' : 'drawer' })
-      .then((res: { ok?: boolean; error?: string } | undefined) => {
-        if (res && res.ok === false) console.error('[viewer] não foi possível trocar o modo:', res.error);
-      })
-      .catch((err) => console.error('[viewer] não foi possível trocar o modo:', err));
+    const mode: DisplayMode = DISPLAY_MODE === 'window' ? panelMode : 'window';
+    const send = (sidePanelOpened: boolean) =>
+      browser.runtime
+        .sendMessage({ target: BACKGROUND_TARGET, type: 'switch-display', mode, sidePanelOpened })
+        .then((res: { ok?: boolean; error?: string } | undefined) => {
+          if (res && res.ok === false) console.error('[viewer] não foi possível trocar o modo:', res.error);
+        })
+        .catch((err) => console.error('[viewer] não foi possível trocar o modo:', err));
+    if (mode !== 'sidepanel') {
+      void send(false);
+      return;
+    }
+    // sidePanel.open() exige o gesto do usuário, que não chega ao background por mensagem;
+    // esta página da extensão abre o painel ela mesma (com callbacks, para o gesto não se
+    // perder) e só então avisa o background.
+    chrome.storage.session.get(CAPTURE_STATE_KEY, (data) => {
+      const tabId = (data?.[CAPTURE_STATE_KEY] as { tabId?: number | null } | undefined)?.tabId;
+      if (tabId == null) {
+        void send(false);
+        return;
+      }
+      chrome.tabs.get(tabId, (tab) => {
+        const windowId = tab?.windowId;
+        if (chrome.runtime.lastError || windowId === undefined) {
+          void send(false);
+          return;
+        }
+        chrome.sidePanel.setOptions({ path: 'viewer.html?mode=sidepanel', enabled: true }, () => {
+          chrome.sidePanel.open({ windowId }, () => {
+            const err = chrome.runtime.lastError;
+            if (err) console.warn('[viewer] sidePanel.open falhou:', err.message);
+            void send(!err);
+          });
+        });
+      });
+    });
   };
   /** Refaz a tradução dos cards que contêm o termo (a proteção/remoção passa a valer neles). */
   const retranslateWith = (term: string) => {
@@ -339,8 +404,8 @@ export function App() {
           <button className="link" onClick={openOptions} title={translatorDetail || translatorLabel}>
             {translatorLabel}
           </button>
-          <button className="link" onClick={switchDisplay} disabled={captureStatus === 'stopped'} title={DISPLAY_MODE === 'drawer' ? 'Abrir numa janela separada' : 'Voltar para o painel na página do vídeo'}>
-            {DISPLAY_MODE === 'drawer' ? 'abrir em janela' : 'voltar para o painel'}
+          <button className="link" onClick={switchDisplay} disabled={captureStatus === 'stopped'} title={DISPLAY_MODE !== 'window' ? 'Abrir numa janela separada' : 'Voltar para o painel ao lado do vídeo'}>
+            {DISPLAY_MODE !== 'window' ? 'abrir em janela' : 'voltar para o painel'}
           </button>
           <button className="danger" onClick={stop} disabled={captureStatus === 'stopped'}>
             {captureStatus === 'stopped' ? 'Parado' : 'Parar'}

@@ -8,7 +8,7 @@ export default defineConfig({
     name: 'Video Translate',
     description:
       'Transcreve o áudio em inglês de um vídeo que está tocando na aba e mostra a tradução em português.',
-    permissions: ['tabCapture', 'offscreen', 'activeTab', 'scripting', 'storage'],
+    permissions: ['tabCapture', 'offscreen', 'activeTab', 'scripting', 'storage', 'sidePanel'],
     // A URL do LibreTranslate é configurável; a permissão de host é pedida só ao salvar.
     optional_host_permissions: ['http://*/*', 'https://*/*'],
     // Último recurso de tradução (endpoint público do Google Tradutor).
@@ -23,7 +23,10 @@ export default defineConfig({
     content_security_policy: {
       extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';",
     },
-    // O painel lateral é um iframe com viewer.html dentro da página do vídeo.
+    // Painel lateral do Chrome (sidePanel): o viewer é aberto via sidePanel.setOptions com
+    // ?mode=sidepanel; o default_path só existe porque a chave é obrigatória para a API.
+    side_panel: { default_path: 'viewer.html' },
+    // O painel sobreposto é um iframe com viewer.html dentro da página do vídeo.
     web_accessible_resources: [{ resources: ['viewer.html'], matches: ['<all_urls>'] }],
     minimum_chrome_version: '116',
   },

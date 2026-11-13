@@ -390,10 +390,14 @@ export function App() {
         <h2>Aparência</h2>
         <label htmlFor="displayMode">Onde mostrar as legendas</label>
         <select id="displayMode" value={opts.displayMode} onChange={(e) => update('displayMode', e.target.value as Options['displayMode'])}>
-          <option value="drawer">Painel lateral na própria página do vídeo (padrão)</option>
+          <option value="sidepanel">Painel lateral do Chrome, ao lado da página (padrão)</option>
+          <option value="drawer">Painel sobreposto à página do vídeo</option>
           <option value="window">Janela separada</option>
         </select>
-        <p className="hint">O painel some em tela cheia (é o esperado) e em páginas que não aceitam scripts (chrome://, loja); nesses casos a janela é usada.</p>
+        <p className="hint">
+          O painel lateral do Chrome encolhe a página para caber ao lado, e a largura se ajusta arrastando a borda dele. O painel sobreposto fica por cima do vídeo e não
+          funciona em páginas que não aceitam scripts (chrome://, loja). Os dois somem em tela cheia (é o esperado); nesses casos use a janela.
+        </p>
         <label htmlFor="fontSize">Tamanho da fonte: {opts.fontSize}px</label>
         <input id="fontSize" type="range" min={12} max={32} step={1} value={opts.fontSize} onChange={(e) => update('fontSize', Number(e.target.value))} />
         <div className="preview" style={{ ['--preview-size' as string]: `${opts.fontSize}px` }}>

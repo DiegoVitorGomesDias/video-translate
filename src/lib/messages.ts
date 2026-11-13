@@ -5,7 +5,10 @@ export const OFFSCREEN_TARGET = 'offscreen' as const;
 export const BACKGROUND_TARGET = 'background' as const;
 export const DRAWER_TARGET = 'drawer' as const;
 
-export type DisplayMode = 'drawer' | 'window';
+/** sidepanel = painel lateral do Chrome (empurra a página); drawer = sobreposto à página; window = janela. */
+export type DisplayMode = 'sidepanel' | 'drawer' | 'window';
+/** Nome da porta que o viewer no painel lateral mantém aberta (fechar o painel encerra a captura). */
+export const SIDEPANEL_PORT = 'viewer-sidepanel' as const;
 
 export type SttModelId = 'auto' | 'moonshine-tiny' | 'moonshine-base' | 'whisper-base.en' | 'whisper-small.en' | 'whisper-large-v3-turbo';
 /** Motor de transcrição: modelo local (transformers.js) ou reconhecimento nativo do Chrome no dispositivo. */
@@ -84,6 +87,8 @@ export interface SwitchDisplayMessage {
   target: typeof BACKGROUND_TARGET;
   type: 'switch-display';
   mode: DisplayMode;
+  /** O remetente (página da extensão com gesto do usuário) já abriu o painel lateral do Chrome. */
+  sidePanelOpened?: boolean;
 }
 
 /** O drawer avisa que o título da página mudou (navegação SPA no YouTube, próximo episódio). */

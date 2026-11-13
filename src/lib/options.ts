@@ -23,7 +23,7 @@ export interface Options {
   translationFallback: 'local' | 'google' | 'none';
   /** Tamanho da fonte das legendas, em px. */
   fontSize: number;
-  /** Painel lateral na própria página (padrão) ou janela separada. */
+  /** Painel lateral do Chrome (padrão), painel sobreposto à página ou janela separada. */
   displayMode: DisplayMode;
   /** Tirar nomes do título da aba para usar como contexto (tradução e transcrição). */
   useTabContext: boolean;
@@ -44,7 +44,7 @@ export const DEFAULT_OPTIONS: Options = {
   vadSensitivity: 'normal',
   translationFallback: 'local',
   fontSize: 18,
-  displayMode: 'drawer',
+  displayMode: 'sidepanel',
   useTabContext: true,
   glossary: '',
 };
