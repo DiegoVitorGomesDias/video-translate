@@ -7,6 +7,8 @@ export const DRAWER_TARGET = 'drawer' as const;
 
 /** sidepanel = painel lateral do Chrome (empurra a página); drawer = sobreposto à página; window = janela. */
 export type DisplayMode = 'sidepanel' | 'drawer' | 'window';
+/** Direção da leitura no viewer: 'top-down' = frase nova embaixo; 'down-top' = frase nova em cima. */
+export type ReadingDirection = 'top-down' | 'down-top';
 
 export type SttModelId = 'auto' | 'moonshine-tiny' | 'moonshine-base' | 'whisper-base.en' | 'whisper-small.en' | 'whisper-large-v3-turbo';
 /** Motor de transcrição: modelo local (transformers.js) ou reconhecimento nativo do Chrome no dispositivo. */
@@ -38,6 +40,8 @@ export interface SpeechContext {
   tabTitle: string;
   useTabContext: boolean;
   glossary: string;
+  /** Termos ignorados pelo usuário (minúsculas), como em Options.ignoredTerms. */
+  ignoredTerms: string[];
 }
 
 /** Título da aba ou opções mudaram; o offscreen refaz o glossário do reconhecimento do Chrome. */

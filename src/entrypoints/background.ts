@@ -302,7 +302,7 @@ async function startCapture(tab: chrome.tabs.Tab, options: Options, surface: Sta
       sttEngine: options.sttEngine,
       vadProfile: options.sentenceSplit,
       vadSensitivity: options.vadSensitivity,
-      context: { tabTitle: tab.title ?? '', useTabContext: options.useTabContext, glossary: options.glossary },
+      context: { tabTitle: tab.title ?? '', useTabContext: options.useTabContext, glossary: options.glossary, ignoredTerms: options.ignoredTerms },
       server: { url: options.sttServerUrl.trim(), format: options.sttServerFormat, model: options.sttServerModel.trim(), apiKey: options.sttServerApiKey.trim() },
     });
     console.log(`[background] captura iniciada na aba ${tab.id} (${tab.title ?? ''})`);
@@ -385,7 +385,7 @@ export default defineBackground(() => {
     void (async () => {
       const state = await getState();
       if (state.tabId === null || !(await hasOffscreenDocument())) return;
-      sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'set-context', context: { useTabContext: o.useTabContext, glossary: o.glossary } }, 1).catch(() => undefined);
+      sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'set-context', context: { useTabContext: o.useTabContext, glossary: o.glossary, ignoredTerms: o.ignoredTerms } }, 1).catch(() => undefined);
     })();
   });
   // Clique no ícone. sidePanel.open() exige o gesto do usuário e o gesto se perde em

@@ -11,6 +11,7 @@ import {
   type SttStatusEvent,
   type TranscriptEvent,
   type DisplayMode,
+  type ReadingDirection,
 } from '@/lib/messages';
 import { SentenceSegmenter, normalize, type Sentence } from '@/lib/segmenter';
 import { saveOptions, watchOptions, type Options } from '@/lib/options';
@@ -50,7 +51,6 @@ export function App() {
   const [translatorRetry, setTranslatorRetry] = useState(0);
   const [applied, setApplied] = useState<AppliedConfig | null>(null);
   const [localStatus, setLocalStatus] = useState<LocalOpusStatus | null>(null);
-  const [removedTerms, setRemovedTerms] = useState<string[]>([]);
   const [addingTerm, setAddingTerm] = useState(false);
   const [newTerm, setNewTerm] = useState('');
 
@@ -63,7 +63,10 @@ export function App() {
   // ---- Contexto: nomes do título da aba + glossário do usuário ----
   const autoTerms = useMemo(() => (options?.useTabContext === false ? [] : extractTermsFromTitle(capture.tabTitle ?? '')), [capture.tabTitle, options?.useTabContext]);
   const manualTerms = useMemo(() => parseGlossary(options?.glossary ?? ''), [options?.glossary]);
-  const terms = useMemo(() => mergeTerms(manualTerms, autoTerms).filter((t) => !removedTerms.includes(t.toLowerCase())), [manualTerms, autoTerms, removedTerms]);
+  // Termos removidos ficam em options.ignoredTerms: antes eram só estado da página e voltavam
+  // ao reiniciar a extensão.
+  const ignoredTerms = options?.ignoredTerms ?? [];
+  const terms = useMemo(() => mergeTerms(manualTerms, autoTerms).filter((t) => !ignoredTerms.includes(t.toLowerCase())), [manualTerms, autoTerms, ignoredTerms]);
   termsRef.current = terms;
 
   // ---- Opções (fonte, LibreTranslate) ----
@@ -217,16 +220,20 @@ export function App() {
     }
   }, [cards, translator]);
 
-  // ---- Auto-scroll ----
+  // ---- Direção da leitura e auto-scroll ----
+  // top-down: frase nova embaixo e a lista rola para o fim; down-top: frase nova em cima
+  // (empilha no topo) e a lista fica presa ao início.
+  const direction: ReadingDirection = options?.readingDirection ?? 'top-down';
+  const newestOnTop = direction === 'down-top';
   useEffect(() => {
     const el = listRef.current;
-    if (el && stuckToEnd) el.scrollTop = el.scrollHeight;
-  }, [cards, partial, stuckToEnd]);
+    if (el && stuckToEnd) el.scrollTop = newestOnTop ? 0 : el.scrollHeight;
+  }, [cards, partial, stuckToEnd, newestOnTop]);
 
   const onScroll = () => {
     const el = listRef.current;
     if (!el) return;
-    const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    const atEnd = newestOnTop ? el.scrollTop < 40 : el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     setStuckToEnd(atEnd);
   };
 
@@ -273,6 +280,12 @@ export function App() {
     const next = Math.min(32, Math.max(12, options.fontSize + delta));
     if (next !== options.fontSize) void saveOptions({ ...options, fontSize: next });
   };
+  /** Botão ao lado de A−/A+: alterna a direção e grava nas opções. */
+  const toggleDirection = () => {
+    if (!options) return;
+    void saveOptions({ ...options, readingDirection: newestOnTop ? 'top-down' : 'down-top' });
+    setStuckToEnd(true);
+  };
   // Da janela, "voltar para o painel" usa o painel escolhido nas opções (Chrome ou sobreposto).
   const panelMode: DisplayMode = options?.displayMode === 'drawer' ? 'drawer' : 'sidepanel';
   const switchDisplay = () => {
@@ -318,8 +331,15 @@ export function App() {
     const re = termPattern(term, 'u');
     setCards((prev) => prev.map((c) => (re.test(c.text) ? { ...c, pt: undefined, ptError: undefined } : c)));
   };
+  /** Tira o termo do contexto para sempre: sai do glossário (se estiver lá) e entra em ignoredTerms. */
   const removeTerm = (term: string) => {
-    setRemovedTerms((r) => [...r, term.toLowerCase()]);
+    if (!options) return;
+    const lower = term.toLowerCase();
+    const glossary = parseGlossary(options.glossary)
+      .filter((t) => t.toLowerCase() !== lower)
+      .join('\n');
+    const ignored = ignoredTerms.includes(lower) ? ignoredTerms : [...ignoredTerms, lower];
+    void saveOptions({ ...options, glossary, ignoredTerms: ignored });
     retranslateWith(term);
   };
   const addTerm = () => {
@@ -327,11 +347,13 @@ export function App() {
     setNewTerm('');
     setAddingTerm(false);
     if (!term || !options) return;
-    setRemovedTerms((r) => r.filter((x) => x !== term.toLowerCase()));
-    if (!manualTerms.some((t) => t.toLowerCase() === term.toLowerCase())) {
+    const lower = term.toLowerCase();
+    const next: Options = { ...options, ignoredTerms: ignoredTerms.filter((x) => x !== lower) };
+    if (!manualTerms.some((t) => t.toLowerCase() === lower)) {
       // Fica no glossário das opções (vale para as próximas capturas também).
-      void saveOptions({ ...options, glossary: options.glossary.trim() ? `${options.glossary.trim()}\n${term}` : term });
+      next.glossary = options.glossary.trim() ? `${options.glossary.trim()}\n${term}` : term;
     }
+    void saveOptions(next);
     retranslateWith(term);
   };
   const prepareChrome = () => {
@@ -424,6 +446,15 @@ export function App() {
             <button className="icon" onClick={() => changeFontSize(2)} disabled={!options || options.fontSize >= 32} aria-label="Aumentar a fonte">
               A+
             </button>
+            <button
+              className="icon direction"
+              onClick={toggleDirection}
+              disabled={!options}
+              aria-label={newestOnTop ? 'Leitura de baixo para cima (nova frase em cima). Clique para novas frases embaixo.' : 'Leitura de cima para baixo (nova frase embaixo). Clique para novas frases em cima.'}
+              title={newestOnTop ? 'Novas frases em cima (de baixo para cima). Clique para passar para embaixo.' : 'Novas frases embaixo (de cima para baixo). Clique para passar para cima.'}
+            >
+              <DirectionIcon newestOnTop={newestOnTop} />
+            </button>
           </span>
           <button className="link" onClick={openOptions} title={translatorDetail || translatorLabel}>
             {translatorLabel}
@@ -453,7 +484,7 @@ export function App() {
             contexto:
           </span>
           {terms.map((t) => (
-            <span className="chip term" key={t} title={manualTerms.some((m) => m.toLowerCase() === t.toLowerCase()) ? 'Do glossário (Opções). Clique no × para ignorar nesta captura.' : `Tirado do título "${capture.tabTitle ?? ''}". Clique no × para ignorar nesta captura.`}>
+            <span className="chip term" key={t} title={manualTerms.some((m) => m.toLowerCase() === t.toLowerCase()) ? 'Do glossário (Opções). Clique no × para tirar do contexto (vale nas próximas capturas também).' : `Tirado do título "${capture.tabTitle ?? ''}". Clique no × para tirar do contexto (vale nas próximas capturas também).`}>
               {t}
               <button className="x" onClick={() => removeTerm(t)} aria-label={`Remover ${t}`}>
                 ×
@@ -520,7 +551,9 @@ export function App() {
           </p>
         )}
 
-        {cards.map((c) => (
+        {newestOnTop && pendingLine && <div className="partial">{pendingLine}</div>}
+
+        {(newestOnTop ? [...cards].reverse() : cards).map((c) => (
           <article className="card" key={c.id}>
             <div className="en">{c.text}</div>
             {translator?.provider ? (
@@ -540,12 +573,12 @@ export function App() {
           </article>
         ))}
 
-        {pendingLine && <div className="partial">{pendingLine}</div>}
+        {!newestOnTop && pendingLine && <div className="partial">{pendingLine}</div>}
       </div>
 
       {!stuckToEnd && (
         <button className="to-end" onClick={() => setStuckToEnd(true)}>
-          ↓ voltar ao fim
+          {newestOnTop ? '↑ voltar ao início' : '↓ voltar ao fim'}
         </button>
       )}
     </div>
@@ -569,6 +602,27 @@ function describeStatus(
   if (stt.device === 'server') return { kind: 'listening', text: `Ouvindo · servidor local (${stt.model ?? 'whisper'})`, detail: stt.message };
   const device = stt.device === 'webgpu' ? 'GPU' : 'CPU';
   return { kind: 'listening', text: `Ouvindo · ${modelShortName(stt.model ?? '')} (${device})`, detail: stt.message };
+}
+
+/** Seta para a barra onde a frase nova entra: em cima (down-top) ou embaixo (top-down). */
+function DirectionIcon({ newestOnTop }: { newestOnTop: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {newestOnTop ? (
+        <>
+          <path d="M2 2h10" />
+          <path d="M7 12V4.5" />
+          <path d="M4 7.5 7 4.5l3 3" />
+        </>
+      ) : (
+        <>
+          <path d="M2 12h10" />
+          <path d="M7 2v7.5" />
+          <path d="M4 6.5 7 9.5l3-3" />
+        </>
+      )}
+    </svg>
+  );
 }
 
 /** Barra de progresso com a porcentagem ao lado. */

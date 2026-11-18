@@ -1,6 +1,6 @@
 // Configurações do usuário, guardadas em chrome.storage.local.
 
-import type { DisplayMode, SttEngineId, SttModelId, VadProfileId, VadSensitivityId } from './messages';
+import type { DisplayMode, ReadingDirection, SttEngineId, SttModelId, VadProfileId, VadSensitivityId } from './messages';
 import { DEFAULT_STT_MODEL } from './stt/models';
 
 export interface Options {
@@ -29,6 +29,10 @@ export interface Options {
   useTabContext: boolean;
   /** Glossário fixo do usuário: nomes/termos a manter, um por linha (ou separados por vírgula). */
   glossary: string;
+  /** Termos (em minúsculas) que o usuário tirou do contexto no viewer: não voltam nas próximas capturas. */
+  ignoredTerms: string[];
+  /** Ordem das frases no viewer: novas embaixo (a tela sobe) ou novas em cima (empilham no topo). */
+  readingDirection: ReadingDirection;
 }
 
 export const DEFAULT_OPTIONS: Options = {
@@ -47,6 +51,8 @@ export const DEFAULT_OPTIONS: Options = {
   displayMode: 'sidepanel',
   useTabContext: true,
   glossary: '',
+  ignoredTerms: [],
+  readingDirection: 'top-down',
 };
 
 export const OPTIONS_KEY = 'options';

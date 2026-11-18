@@ -264,6 +264,14 @@ export function App() {
         <label htmlFor="glossary">Glossário fixo (um termo por linha ou separados por vírgula)</label>
         <textarea id="glossary" rows={4} value={opts.glossary} onChange={(e) => update('glossary', e.target.value)} placeholder={'Cuddy\nWilson\nForeman'} style={{ width: '100%', font: 'inherit' }} />
         <p className="hint">Vale em todas as capturas, somado aos nomes do título. Use para personagens, siglas e termos técnicos que devem ficar como estão. Só casa palavra inteira com a mesma capitalização.</p>
+        {opts.ignoredTerms.length > 0 && (
+          <p className="hint">
+            Nomes tirados do contexto na janela de legendas (não voltam nas próximas capturas): <code>{opts.ignoredTerms.join(', ')}</code>{' '}
+            <button type="button" onClick={() => update('ignoredTerms', [])}>
+              Restaurar todos
+            </button>
+          </p>
+        )}
       </section>
 
       <section>
@@ -398,6 +406,12 @@ export function App() {
           O painel lateral do Chrome encolhe a página para caber ao lado, e a largura se ajusta arrastando a borda dele. O painel sobreposto fica por cima do vídeo e não
           funciona em páginas que não aceitam scripts (chrome://, loja). Os dois somem em tela cheia (é o esperado); nesses casos use a janela.
         </p>
+        <label htmlFor="readingDirection">Direção da leitura</label>
+        <select id="readingDirection" value={opts.readingDirection} onChange={(e) => update('readingDirection', e.target.value as Options['readingDirection'])}>
+          <option value="top-down">De cima para baixo: a frase nova aparece embaixo e a tela sobe</option>
+          <option value="down-top">De baixo para cima: a frase nova aparece em cima e empilha no topo</option>
+        </select>
+        <p className="hint">Também dá para trocar pelo botão de seta ao lado de A−/A+ na janela de legendas.</p>
         <label htmlFor="fontSize">Tamanho da fonte: {opts.fontSize}px</label>
         <input id="fontSize" type="range" min={12} max={32} step={1} value={opts.fontSize} onChange={(e) => update('fontSize', Number(e.target.value))} />
         <div className="preview" style={{ ['--preview-size' as string]: `${opts.fontSize}px` }}>

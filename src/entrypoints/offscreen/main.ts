@@ -249,7 +249,8 @@ async function startCapture(
   const applyPhrases = () => {
     if (!provider.setPhrases) return;
     const auto = context.useTabContext ? extractTermsFromTitle(context.tabTitle) : [];
-    const terms = mergeTerms(parseGlossary(context.glossary), auto);
+    const ignored = context.ignoredTerms ?? [];
+    const terms = mergeTerms(parseGlossary(context.glossary), auto).filter((t) => !ignored.includes(t.toLowerCase()));
     provider.setPhrases(terms);
     log(`glossário do reconhecimento: ${terms.join(', ') || '(vazio)'}`);
   };
@@ -336,7 +337,7 @@ browser.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
           m.sttEngine ?? 'local',
           m.vadProfile ?? 'normal',
           m.vadSensitivity ?? 'normal',
-          m.context ?? { tabTitle: '', useTabContext: true, glossary: '' },
+          m.context ?? { tabTitle: '', useTabContext: true, glossary: '', ignoredTerms: [] },
           { ...DEFAULT_SERVER_SPEECH, ...(m.server ?? {}) },
         );
         return { ok: true };
