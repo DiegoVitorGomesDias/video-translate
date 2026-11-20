@@ -13,6 +13,7 @@ import {
   type OffscreenMessage,
 } from '@/lib/messages';
 import { DEFAULT_OPTIONS, OPTIONS_KEY, loadOptions, saveOptions, watchOptions, type Options } from '@/lib/options';
+import { chooseCaptureTab } from '@/lib/capture-target';
 
 const OFFSCREEN_URL = '/offscreen.html';
 const VIEWER_URL = '/viewer.html';
@@ -332,7 +333,19 @@ async function startCapture(tab: chrome.tabs.Tab, options: Options, surface: Sta
   }
 }
 
-async function stopCapture(): Promise<void> {
+/** Parada em andamento: o evento "stopped" que o próprio offscreen emite durante ela não deve disparar outra. */
+let stopping: Promise<void> | null = null;
+
+function stopCapture(): Promise<void> {
+  // Uma segunda parada concorrente (evento "stopped" do offscreen, aba fechada) poderia
+  // limpar o estado depois de uma captura nova ter começado (troca de aba).
+  stopping ??= doStopCapture().finally(() => {
+    stopping = null;
+  });
+  return stopping;
+}
+
+async function doStopCapture(): Promise<void> {
   const state = await getState();
   if (await hasOffscreenDocument()) {
     try {
@@ -343,8 +356,23 @@ async function stopCapture(): Promise<void> {
     await browser.offscreen.closeDocument().catch(() => undefined);
   }
   // Os viewers ficam abertos mostrando "Parado" com o botão Iniciar; só o estado é limpo.
-  await setState({ ...EMPTY_STATE, lastTabId: state.tabId, lastWindowId: state.windowId ?? null, lastMode: state.mode });
+  await setState({ ...EMPTY_STATE, lastWindowId: state.windowId ?? null, lastMode: state.mode });
   console.log('[background] captura encerrada');
+}
+
+/**
+ * Já capturando uma aba e o usuário pediu para começar em outra (clique no ícone ou
+ * "Iniciar" estando nela): para a captura antiga (e o stream do offscreen) e começa na
+ * nova. O viewer da anterior é reaproveitado: janela e painel do Chrome são globais; o
+ * drawer fica na aba antiga, então é fechado e reaberto na nova.
+ */
+async function switchCapture(prev: CaptureState, tab: chrome.tabs.Tab, options: Options, surface: StartSurface): Promise<void> {
+  console.log(`[background] trocando a captura da aba ${prev.tabId} para a aba ${tab.id}`);
+  await stopCapture();
+  if (prev.mode === 'drawer' && prev.tabId !== null && prev.tabId !== tab.id) await closeDrawer(prev.tabId);
+  // Janela: stopCapture guardou lastWindowId e showViewer a reaproveita; drawer: showViewer
+  // o injeta na aba nova; painel do Chrome: é global na janela e continua aberto.
+  await startCapture(tab, options, surface);
 }
 
 /** Encerra a captura e fecha os viewers (botão ✕ do drawer). */
@@ -356,42 +384,40 @@ async function stopCaptureAndClose(): Promise<void> {
 }
 
 /**
- * "Iniciar" num viewer já aberto. Escolhe a aba: a que o viewer indicou (painel lateral:
- * aba ativa da janela), a aba do próprio viewer (drawer), a da captura anterior, ou a aba
- * ativa da última janela normal. getMediaStreamId não exige gesto, mas exige activeTab ou
- * permissão de host para a aba.
+ * "Iniciar" num viewer já aberto. A fonte é a aba em que o usuário estava ao clicar: a que
+ * o viewer indicou (painel lateral: aba ativa da janela), a aba do próprio viewer (drawer)
+ * ou a aba ativa da última janela normal em foco (janela separada). Nunca a aba da captura
+ * anterior: sem activeTab a URL da aba nova vem escondida, e a antiga (visível) ganhava a
+ * escolha, deixando a extensão presa a ela. Se já estiver capturando outra aba, troca.
+ * getMediaStreamId não exige gesto, mas exige activeTab ou permissão de host para a aba.
  */
 async function startFromViewer(msg: { tabId?: number; from: { mode: DisplayMode; windowId?: number } }, senderTabId: number | undefined): Promise<void> {
   const state = await getState();
-  if (state.tabId !== null) {
+  const options = await loadOptions();
+  const getTab = async (id: number | undefined) => (id == null ? undefined : await browser.tabs.get(id).catch(() => undefined));
+  // sender.tab só interessa para o drawer (iframe dentro da aba do vídeo); na janela é a aba do próprio viewer.
+  const candidates = [await getTab(msg.tabId), msg.from.mode === 'drawer' ? await getTab(senderTabId) : undefined];
+  let tab = chooseCaptureTab(candidates);
+  if (!tab) {
+    // Janela separada (ou painel sem aba indicada): a aba ativa da janela normal usada por último.
+    const last = await browser.windows.getLastFocused({ windowTypes: ['normal'], populate: true }).catch(() => undefined);
+    const wins = await browser.windows.getAll({ windowTypes: ['normal'], populate: true });
+    const win = last ?? wins.find((w) => w.focused) ?? wins[0];
+    tab = chooseCaptureTab([win?.tabs?.find((t) => t.active)]);
+  }
+  if (!tab) throw new Error('nenhuma aba com vídeo para capturar');
+  if (state.tabId !== null && state.tabId === tab.id) {
     await focusViewer(state);
     return;
   }
-  const options = await loadOptions();
-  // Páginas da extensão (a própria janela do viewer) não têm URL visível para nós e não podem ser capturadas.
-  const isPage = (t: chrome.tabs.Tab | undefined): t is chrome.tabs.Tab => !!t && t.id !== undefined && /^https?:/.test(t.url ?? '');
-  let tab: chrome.tabs.Tab | undefined;
-  // sender.tab só interessa para o drawer (iframe dentro da aba do vídeo); na janela é a aba do próprio viewer.
-  for (const id of [msg.tabId, msg.from.mode === 'drawer' ? senderTabId : undefined, state.lastTabId ?? undefined]) {
-    if (id == null) continue;
-    const t = await browser.tabs.get(id).catch(() => undefined);
-    if (isPage(t)) {
-      tab = t;
-      break;
-    }
-  }
-  if (!tab) {
-    const wins = await browser.windows.getAll({ windowTypes: ['normal'], populate: true });
-    const win = wins.find((w) => w.focused) ?? wins[0];
-    tab = win?.tabs?.find((t) => t.active && isPage(t));
-  }
-  if (!tab) throw new Error('nenhuma aba com vídeo para capturar');
   console.log(`[background] iniciar pelo viewer (${msg.from.mode}) na aba ${tab.id}`);
+  const surface: StartSurface = { kind: 'existing', mode: msg.from.mode, windowId: msg.from.windowId };
   try {
-    await startCapture(tab, options, { kind: 'existing', mode: msg.from.mode, windowId: msg.from.windowId });
+    if (state.tabId !== null) await switchCapture(state, tab, options, surface);
+    else await startCapture(tab, options, surface);
   } catch (err) {
     // activeTab vale só para a aba em que o ícone foi clicado (e até ela navegar).
-    if (String(err).includes('not been invoked')) throw new Error(`a aba "${tab.title ?? tab.url}" precisa ser ativada: clique no ícone da extensão nela`);
+    if (String(err).includes('not been invoked')) throw new Error(`esta aba ainda não deu acesso à extensão: clique no ícone da extensão nela para iniciar`);
     throw err;
   }
 }
@@ -423,7 +449,11 @@ export default defineBackground(() => {
           await closeSidePanel();
           sidePanelOpened = false;
         }
-        if (state.tabId !== null) {
+        if (state.tabId !== null && tab.id !== undefined && tab.id !== state.tabId) {
+          // Clique no ícone em outra aba: a fonte passa a ser esta aba (o clique concede
+          // activeTab nela), e a antiga é encerrada.
+          await switchCapture(state, tab, options, { kind: 'open', sidePanelOpened });
+        } else if (state.tabId !== null) {
           if (sidePanelOpened) {
             if (state.mode !== 'sidepanel') await setState({ ...state, mode: 'sidepanel' });
             return; // já estava capturando; o painel foi reaberto
@@ -493,10 +523,11 @@ export default defineBackground(() => {
     }
     if (isBroadcastEvent(msg) && msg.type === 'capture-status') {
       console.log(`[background] offscreen: ${msg.status}${msg.error ? ` (${msg.error})` : ''}`);
-      if (msg.status === 'stopped') {
-        // O offscreen encerrou sozinho (ex.: a aba parou de compartilhar).
+      if (msg.status === 'stopped' && !stopping) {
+        // O offscreen encerrou sozinho (ex.: a aba parou de compartilhar). Durante uma parada
+        // nossa (inclusive a troca de aba) o evento é só o eco dela.
         void getState().then((s) => {
-          if (s.tabId !== null) void stopCapture();
+          if (s.tabId !== null && !stopping) void stopCapture();
         });
       }
     }
