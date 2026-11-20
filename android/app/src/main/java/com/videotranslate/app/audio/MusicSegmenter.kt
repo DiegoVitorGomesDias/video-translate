@@ -47,13 +47,20 @@ class MusicSegmenter(
     override var onSpeechStart: ((Int) -> Unit)? = null
     override var onLevel: ((rms: Float, isSpeech: Boolean) -> Unit)? = null
 
-    override val isSpeaking: Boolean get() = open
-    override val currentSegmentId: Int get() = if (open) currentId else 0
-    override val currentDurationMs: Double get() = length * 1000.0 / sampleRate
+    /** Mesmo lock do EnergyVad: `push` vem da thread de áudio, o resto de coroutines. */
+    private val lock = Any()
 
-    override fun peek(): FloatArray? = if (open && length > 0) concat(blocks, length) else null
+    override val isSpeaking: Boolean get() = synchronized(lock) { open }
+    override val currentSegmentId: Int get() = synchronized(lock) { if (open) currentId else 0 }
+    override val currentDurationMs: Double get() = synchronized(lock) { length * 1000.0 / sampleRate }
 
-    override fun push(block: FloatArray) {
+    override fun peek(): FloatArray? = synchronized(lock) { if (open && length > 0) concat(blocks, length) else null }
+
+    override fun peekWithId(): Pair<Int, FloatArray>? = synchronized(lock) { if (open && length > 0) currentId to concat(blocks, length) else null }
+
+    override fun push(block: FloatArray) = synchronized(lock) { pushLocked(block) }
+
+    private fun pushLocked(block: FloatArray) {
         var sum = 0.0
         for (v in block) sum += v * v
         val rms = Math.sqrt(sum / maxOf(1, block.size)).toFloat()
@@ -75,7 +82,7 @@ class MusicSegmenter(
         else if (length >= windowSamples) splitAtQuietest()
     }
 
-    override fun flush() { if (open) close(SegmentReason.FLUSH) }
+    override fun flush() = synchronized(lock) { if (open) close(SegmentReason.FLUSH) }
 
     private fun splitAtQuietest() {
         var acc = 0
