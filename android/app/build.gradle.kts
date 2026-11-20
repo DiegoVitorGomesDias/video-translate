@@ -7,8 +7,8 @@ plugins {
 }
 
 // Versão do projeto (igual ao package.json da raiz).
-val appVersionName = "0.5.1"
-val appVersionCode = 6
+val appVersionName = "0.5.2"
+val appVersionCode = 7
 
 // sherpa-onnx (STT local) é distribuído como AAR nos releases do GitHub, não no Maven.
 val sherpaVersion = "2.0.1"
@@ -39,6 +39,17 @@ android {
         versionCode = appVersionCode
         versionName = appVersionName
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+    }
+
+    // Um APK por arquitetura (o universal, com todas, passa de 160 MB) para o link público
+    // de download do GitHub Pages ficar leve; o universal continua saindo para o release.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = true
+        }
     }
 
     buildTypes {
