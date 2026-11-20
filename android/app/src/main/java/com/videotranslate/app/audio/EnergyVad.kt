@@ -54,13 +54,24 @@ class EnergyVad(
     override var onSpeechStart: ((Int) -> Unit)? = null
     override var onLevel: ((rms: Float, isSpeech: Boolean) -> Unit)? = null
 
-    override val isSpeaking: Boolean get() = inSpeech
-    override val currentSegmentId: Int get() = if (inSpeech) currentId else 0
-    override val currentDurationMs: Double get() = segmentLength * 1000.0 / sampleRate
+    /**
+     * `push` roda na thread de leitura do áudio e `peek`/`isSpeaking` rodam na coroutine das
+     * parciais: sem este lock, `concat` percorria a lista enquanto a outra thread a alterava
+     * (ConcurrentModificationException / ArrayIndexOutOfBounds → o app fechava "do nada").
+     */
+    private val lock = Any()
 
-    override fun peek(): FloatArray? = if (inSpeech && segmentLength > 0) concat(segment, segmentLength) else null
+    override val isSpeaking: Boolean get() = synchronized(lock) { inSpeech }
+    override val currentSegmentId: Int get() = synchronized(lock) { if (inSpeech) currentId else 0 }
+    override val currentDurationMs: Double get() = synchronized(lock) { segmentLength * 1000.0 / sampleRate }
 
-    override fun push(block: FloatArray) {
+    override fun peek(): FloatArray? = synchronized(lock) { if (inSpeech && segmentLength > 0) concat(segment, segmentLength) else null }
+
+    override fun peekWithId(): Pair<Int, FloatArray>? = synchronized(lock) { if (inSpeech && segmentLength > 0) currentId to concat(segment, segmentLength) else null }
+
+    override fun push(block: FloatArray) = synchronized(lock) { pushLocked(block) }
+
+    private fun pushLocked(block: FloatArray) {
         var sum = 0.0
         for (v in block) sum += v * v
         val rms = Math.sqrt(sum / maxOf(1, block.size)).toFloat()
@@ -101,7 +112,7 @@ class EnergyVad(
         else if (segmentLength >= maxSamples) splitAtQuietest()
     }
 
-    override fun flush() { if (inSpeech) close(SegmentReason.FLUSH) }
+    override fun flush() = synchronized(lock) { if (inSpeech) close(SegmentReason.FLUSH) }
 
     private fun splitAtQuietest() {
         val window = (1.2 * sampleRate).toInt()
