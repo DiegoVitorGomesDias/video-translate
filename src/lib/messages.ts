@@ -69,7 +69,13 @@ export interface GetTranscriptsMessage {
   type: 'get-transcripts';
 }
 
-export type OffscreenMessage = StartCaptureMessage | StopCaptureMessage | GetTranscriptsMessage | SetContextMessage;
+/** Botão "limpar" do viewer: apaga o histórico e o contexto das frases anteriores (prompt do Whisper). */
+export interface ClearTranscriptsMessage {
+  target: typeof OFFSCREEN_TARGET;
+  type: 'clear-transcripts';
+}
+
+export type OffscreenMessage = StartCaptureMessage | StopCaptureMessage | GetTranscriptsMessage | SetContextMessage | ClearTranscriptsMessage;
 
 export interface GetTranscriptsResponse {
   finals: TranscriptEvent[];
@@ -118,7 +124,13 @@ export interface TabTitleMessage {
   url: string;
 }
 
-export type BackgroundMessage = StopCaptureRequestMessage | StartCaptureRequestMessage | DrawerClosedMessage | SwitchDisplayMessage | TabTitleMessage;
+/** Botão "limpar" do viewer: relê o título da aba capturada (novo vídeo) e refaz o contexto. */
+export interface RefreshTabTitleMessage {
+  target: typeof BACKGROUND_TARGET;
+  type: 'refresh-tab-title';
+}
+
+export type BackgroundMessage = StopCaptureRequestMessage | StartCaptureRequestMessage | DrawerClosedMessage | SwitchDisplayMessage | TabTitleMessage | RefreshTabTitleMessage;
 
 // ---- Para o content script do drawer (via tabs.sendMessage) ----
 

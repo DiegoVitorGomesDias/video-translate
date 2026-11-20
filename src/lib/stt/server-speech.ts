@@ -156,6 +156,10 @@ export class ServerSpeechProvider implements SpeechProvider {
     this.recent = [];
   }
 
+  resetContext(): void {
+    this.recent = [];
+  }
+
   transcribe(segment: AudioSegment): void {
     this.enqueue({ id: this.nextId++, segmentId: segment.id, isFinal: true, reason: segment.reason, audio: segment.audio, sampleRate: segment.sampleRate, audioEndedAt: segment.endedAt });
   }

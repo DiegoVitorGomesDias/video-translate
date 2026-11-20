@@ -59,4 +59,6 @@ export interface SpeechProvider {
   setPhrases?(terms: string[]): void;
   /** Modo música: dica de canto no prompt do Whisper e filtro de eco só contra o verso anterior (refrões repetem). */
   setMusicMode?(on: boolean): void;
+  /** Esquece as frases anteriores usadas como contexto (prompt do Whisper, filtro de eco): novo vídeo. */
+  resetContext?(): void;
 }

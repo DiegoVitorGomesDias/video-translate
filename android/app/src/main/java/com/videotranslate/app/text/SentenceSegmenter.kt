@@ -19,6 +19,11 @@ class SentenceSegmenter(private val maxChars: Int = 90, private val maxWaitMs: L
 
     val pending: String get() = rest
 
+    /** Descarta o resto pendente (botão "limpar"); os ids continuam, para uma tradução em curso não cair numa frase nova. */
+    @Synchronized
+    fun reset() { rest = ""; restSince = 0L }
+
+    @Synchronized
     fun push(text: String, now: Long = System.currentTimeMillis(), reason: EndReason = EndReason.MAX_LENGTH): List<Sentence> {
         val cleaned = normalize(text)
         if (cleaned.isEmpty()) return if (reason == EndReason.MAX_LENGTH) flushIfStale(now) else flush(now)

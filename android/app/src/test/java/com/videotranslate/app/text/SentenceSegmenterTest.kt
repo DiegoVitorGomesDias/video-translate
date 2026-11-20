@@ -83,4 +83,17 @@ class SentenceSegmenterTest {
         val seg = SentenceSegmenter()
         assertTrue(seg.push(".", 0, EndReason.SILENCE).isEmpty())
     }
+
+    @Test fun resetDescartaRestoEMantemIds() {
+        val seg = SentenceSegmenter()
+        assertEquals(1, seg.push("Hello there.", 1000, EndReason.SILENCE).single().id)
+        assertTrue(seg.push("and my goal is for you", 2000).isEmpty())
+        assertEquals("and my goal is for you", seg.pending)
+        seg.reset()
+        assertEquals("", seg.pending)
+        assertTrue(seg.flush(3000).isEmpty())
+        val next = seg.push("New video starts.", 4000, EndReason.SILENCE).single()
+        assertEquals("New video starts.", next.text)
+        assertEquals(2, next.id)
+    }
 }

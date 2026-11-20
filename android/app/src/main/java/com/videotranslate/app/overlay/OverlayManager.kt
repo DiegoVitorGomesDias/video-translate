@@ -53,8 +53,9 @@ class OverlayManager(private val context: Context, private val settings: Setting
         status.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         collapseBtn.text = "–"; styleButton(collapseBtn)
         collapseBtn.setOnClickListener { toggleCollapse() }
+        val clearBtn = Button(context).apply { text = "⌫"; contentDescription = "Limpar legendas"; styleButton(this); setOnClickListener { CaptureService.clear(context) } }
         val stopBtn = Button(context).apply { text = "✕"; styleButton(this); setOnClickListener { CaptureService.stop(context) } }
-        bar.addView(status); bar.addView(collapseBtn); bar.addView(stopBtn)
+        bar.addView(status); bar.addView(clearBtn); bar.addView(collapseBtn); bar.addView(stopBtn)
         bar.setOnTouchListener(DragListener())
         root.addView(bar)
 
@@ -82,6 +83,9 @@ class OverlayManager(private val context: Context, private val settings: Setting
         while (cards.size > settings.overlayLines) cards.removeAt(0)
         render()
     }
+
+    /** Botão "limpar": tira as frases do painel (novo vídeo). */
+    fun clear() = main.post { cards.clear(); render() }
 
     fun updateTranslation(id: Int, pt: String) = main.post {
         val i = cards.indexOfFirst { it.id == id }

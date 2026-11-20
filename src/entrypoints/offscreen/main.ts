@@ -378,6 +378,14 @@ browser.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
       case 'set-context':
         session?.setContext(m.context);
         return { ok: true };
+      case 'clear-transcripts':
+        // Novo vídeo na mesma aba: o histórico (para viewers que abrirem depois) e as frases
+        // anteriores do prompt do Whisper/filtro de eco não valem mais.
+        finals.length = 0;
+        lastPartial = null;
+        session?.provider.resetContext?.();
+        log('histórico e contexto limpos pelo viewer');
+        return { ok: true };
       case 'stop-capture':
         await stopCapture();
         return { ok: true };

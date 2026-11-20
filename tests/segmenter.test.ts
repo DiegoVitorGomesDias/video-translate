@@ -124,3 +124,17 @@ test('limite de 90 caracteres corta na vírgula ou conjunção', () => {
   assert.equal(head, 'alpha beta gamma');
   assert.equal(tail, 'and delta epsilon zeta');
 });
+
+test('reset descarta o resto pendente e mantém a sequência de ids', () => {
+  const seg = new SentenceSegmenter();
+  const [first] = seg.push('Hello there.', 1000, 'silence');
+  assert.equal(first.id, 1);
+  assert.deepEqual(seg.push('and my goal is for you', 2000), []);
+  assert.equal(seg.pending, 'and my goal is for you');
+  seg.reset();
+  assert.equal(seg.pending, '');
+  assert.deepEqual(seg.flush(3000), []);
+  const [next] = seg.push('New video starts.', 4000, 'silence');
+  assert.equal(next.text, 'New video starts.');
+  assert.equal(next.id, 2);
+});

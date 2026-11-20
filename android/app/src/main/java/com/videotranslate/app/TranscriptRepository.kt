@@ -31,6 +31,9 @@ object TranscriptRepository {
 
     fun reset() = _state.update { UiState() }
 
+    /** Botão "limpar": apaga as frases e a parcial, mantendo estado da captura e tradutor. */
+    fun clearTranscript() = _state.update { it.copy(cards = emptyList(), partial = "") }
+
     fun addCard(card: Card) = _state.update { it.copy(cards = (it.cards + card).takeLast(500)) }
 
     fun setTranslation(id: Int, pt: String?, error: String?) = _state.update { s ->

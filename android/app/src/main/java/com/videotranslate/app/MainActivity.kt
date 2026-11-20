@@ -133,6 +133,8 @@ fun MainScreen() {
             Spacer(Modifier.width(6.dp))
             Text("v$version", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.weight(1f))
+            // Novo vídeo: apaga as legendas do anterior (a captura continua).
+            TextButton(onClick = { CaptureService.clear(context) }, enabled = state.cards.isNotEmpty() || state.partial.isNotEmpty()) { Text("Limpar") }
             TextButton(onClick = { showSettings = true }) { Text("⚙ Configurações") }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {

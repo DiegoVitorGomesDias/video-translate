@@ -35,6 +35,8 @@ export type WorkerInMessage =
   | { type: 'set-terms'; terms: string[] }
   /** Modo música: dica de canto no prompt até haver versos; filtro de eco só contra a janela anterior. */
   | { type: 'set-mode'; music: boolean }
+  /** Esquece as últimas frases do prompt (botão "limpar": novo vídeo). */
+  | { type: 'reset-context' }
   | { type: 'dispose' };
 
 export type WorkerOutMessage =
@@ -360,6 +362,9 @@ self.onmessage = (event: MessageEvent<WorkerInMessage>) => {
       break;
     case 'set-mode':
       musicMode = msg.music;
+      recentFinals.length = 0;
+      break;
+    case 'reset-context':
       recentFinals.length = 0;
       break;
     case 'dispose':
