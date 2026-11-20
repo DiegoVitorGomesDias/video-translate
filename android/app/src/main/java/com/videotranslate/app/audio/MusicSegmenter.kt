@@ -18,13 +18,13 @@ class MusicSegmenter(
     minSoundMs: Int = MIN_SOUND_MS,
 ) : AudioSegmenter {
     companion object {
-        const val WINDOW_MS = 7000
-        const val MAX_WINDOW_MS = 9000
-        const val SEARCH_MS = 2500
-        const val SILENCE_MS = 1200
+        const val WINDOW_MS = 3500
+        const val MAX_WINDOW_MS = 5000
+        const val SEARCH_MS = 1500
+        const val SILENCE_MS = 800
         const val MIN_RMS = 0.004f
-        const val MIN_SOUND_MS = 800
-        const val LABEL = "Música (janelas de ~7 s)"
+        const val MIN_SOUND_MS = 500
+        const val LABEL = "Música (janelas de ~3,5 s)"
     }
 
     private fun ms(v: Int) = (v / 1000.0 * sampleRate).toInt()
