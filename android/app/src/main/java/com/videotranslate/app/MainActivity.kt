@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.videotranslate.app.audio.MusicSegmenter
 import com.videotranslate.app.audio.VadProfile
 import com.videotranslate.app.stt.SttModel
 
@@ -136,11 +137,13 @@ fun MainScreen() {
             if (state.translatorName.isNotEmpty()) Text(state.translatorName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         run {
-            val model = state.appliedModel.ifEmpty { settings.sttModel.label.substringBefore(" (") }
-            val profile = state.appliedProfile.ifEmpty { "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s)" }
-            val changed = running && state.appliedModel.isNotEmpty() && (settings.sttModel.label.substringBefore(" (") != state.appliedModel || !state.appliedProfile.startsWith(settings.vadProfile.label))
+            val music = settings.audioMode == AudioMode.MUSIC
+            val model = state.appliedModel.ifEmpty { settings.activeModel.label.substringBefore(" (") }
+            val wantedProfile = if (music) MusicSegmenter.LABEL else "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s)"
+            val profile = state.appliedProfile.ifEmpty { wantedProfile }
+            val changed = running && state.appliedModel.isNotEmpty() && (settings.activeModel.label.substringBefore(" (") != state.appliedModel || state.appliedProfile != wantedProfile)
             Text(
-                "Modelo: $model · Separação: $profile" + if (changed) "  (novas opções valem na próxima captura)" else "",
+                "Modelo: $model · ${if (profile.startsWith("Música")) "Modo: $profile" else "Separação: $profile"}" + if (changed) "  (novas opções valem na próxima captura)" else "",
                 style = MaterialTheme.typography.labelSmall, color = if (changed) Color(0xFFB26A00) else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp).clickable { showSettings = true },
             )
@@ -203,11 +206,24 @@ fun SettingsDialog(initial: Settings, onDismiss: () -> Unit, onSave: (Settings) 
                 RadioRow("Áudio do aparelho (funciona com fone; YouTube, Chrome)", s.audioSource == AudioSource.INTERNAL) { s = s.copy(audioSource = AudioSource.INTERNAL) }
                 RadioRow("Microfone", s.audioSource == AudioSource.MICROPHONE) { s = s.copy(audioSource = AudioSource.MICROPHONE) }
 
-                Text("Modelo de transcrição (vale na próxima captura)", style = MaterialTheme.typography.labelLarge)
-                SttModel.entries.forEach { m -> RadioRow("${m.label} · ~${m.sizeMb} MB", s.sttModel == m) { s = s.copy(sttModel = m) } }
+                Text("Modo de áudio (vale na próxima captura)", style = MaterialTheme.typography.labelLarge)
+                RadioRow("Fala: filmes, séries, vídeos falados (detector de fala + Moonshine)", s.audioMode == AudioMode.SPEECH) { s = s.copy(audioMode = AudioMode.SPEECH) }
+                RadioRow("Música: letras cantadas em inglês (janelas de ~7 s + Whisper)", s.audioMode == AudioMode.MUSIC) { s = s.copy(audioMode = AudioMode.MUSIC) }
 
-                Text("Separação de frases", style = MaterialTheme.typography.labelLarge)
-                VadProfile.entries.forEach { p -> RadioRow("${p.label}: pausa ${p.silenceMs} ms, até ${p.maxSegmentMs / 1000} s", s.vadProfile == p) { s = s.copy(vadProfile = p) } }
+                if (s.audioMode == AudioMode.MUSIC) {
+                    Text("Modelo do modo música", style = MaterialTheme.typography.labelLarge)
+                    SttModel.entries.filter { it.forMusic }.forEach { m -> RadioRow("${m.label} · download ~${m.sizeMb} MB", s.musicModel == m) { s = s.copy(musicModel = m) } }
+                    Text(
+                        "O Whisper entende voz cantada sobre instrumentos; o Moonshine não. Sem detector de fala: cada janela de ~7 s vira um verso, cortada no ponto mais silencioso. Sem texto parcial; a legenda chega alguns segundos depois do verso. Trechos só instrumentais são descartados.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                } else {
+                    Text("Modelo de transcrição", style = MaterialTheme.typography.labelLarge)
+                    SttModel.entries.filter { it.forSpeech }.forEach { m -> RadioRow("${m.label} · ~${m.sizeMb} MB", s.sttModel == m) { s = s.copy(sttModel = m) } }
+
+                    Text("Separação de frases", style = MaterialTheme.typography.labelLarge)
+                    VadProfile.entries.forEach { p -> RadioRow("${p.label}: pausa ${p.silenceMs} ms, até ${p.maxSegmentMs / 1000} s", s.vadProfile == p) { s = s.copy(vadProfile = p) } }
+                }
 
                 Text("Tamanho da fonte: ${s.fontSp}", style = MaterialTheme.typography.labelLarge)
                 Slider(value = s.fontSp.toFloat(), onValueChange = { s = s.copy(fontSp = it.toInt()) }, valueRange = 12f..32f)

@@ -105,6 +105,15 @@ export const STT_MODELS: SttModelInfo[] = [
 
 export const DEFAULT_STT_MODEL: SttModelId = 'auto';
 
+/** Modelos aceitos no modo música: só Whisper (treinado também com canto; o Moonshine só com fala). */
+export const MUSIC_STT_MODELS: SttModelId[] = ['whisper-base.en', 'whisper-small.en', 'whisper-large-v3-turbo'];
+/** Padrão do modo música: o small acerta bem mais letras que o base e cabe no tempo de uma janela de ~7 s na GPU. */
+export const DEFAULT_MUSIC_STT_MODEL: SttModelId = 'whisper-small.en';
+
+export function isMusicModel(id: SttModelId): boolean {
+  return MUSIC_STT_MODELS.includes(id);
+}
+
 export function getModelInfo(id: SttModelId): SttModelInfo {
   return STT_MODELS.find((m) => m.id === id) ?? STT_MODELS[0]!;
 }

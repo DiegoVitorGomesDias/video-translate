@@ -16,6 +16,8 @@ export type SttEngineId = 'local' | 'chrome' | 'server';
 export type VadEngineId = 'silero' | 'energy';
 export type VadProfileId = 'fast' | 'normal' | 'long';
 export type VadSensitivityId = 'low' | 'normal' | 'high';
+/** Fala (detector de fala + modelo escolhido) ou música (janelas fixas + Whisper, para letras). */
+export type AudioModeId = 'speech' | 'music';
 export type SegmentEndReason = 'silence' | 'max-length' | 'flush';
 
 // ---- Para o offscreen ----
@@ -29,6 +31,8 @@ export interface StartCaptureMessage {
   sttEngine: SttEngineId;
   vadProfile: VadProfileId;
   vadSensitivity?: VadSensitivityId;
+  /** Modo música: sem detector de fala, janelas de ~7 s, filtro de alucinações (padrão 'speech'). */
+  audioMode?: AudioModeId;
   /** Contexto inicial (o offscreen não acessa chrome.storage; o background manda). */
   context?: SpeechContext;
   /** Configuração do servidor local de transcrição (motor 'server'). */
@@ -134,6 +138,7 @@ export interface AppliedConfig {
   sttModel: SttModelId;
   vadProfile: VadProfileId;
   vadSensitivity?: VadSensitivityId;
+  audioMode?: AudioModeId;
   /** Motor pedido nas opções e o que de fato está em uso (o Chrome pode cair para o local). */
   sttEngine?: SttEngineId;
   activeEngine?: SttEngineId;

@@ -1,7 +1,7 @@
 // Configurações do usuário, guardadas em chrome.storage.local.
 
-import type { DisplayMode, ReadingDirection, SttEngineId, SttModelId, VadProfileId, VadSensitivityId } from './messages';
-import { DEFAULT_STT_MODEL } from './stt/models';
+import type { AudioModeId, DisplayMode, ReadingDirection, SttEngineId, SttModelId, VadProfileId, VadSensitivityId } from './messages';
+import { DEFAULT_MUSIC_STT_MODEL, DEFAULT_STT_MODEL } from './stt/models';
 
 export interface Options {
   /** URL base da instância do LibreTranslate (vazio desativa). */
@@ -19,6 +19,10 @@ export interface Options {
   sentenceSplit: VadProfileId;
   /** Sensibilidade do detector de fala (ver VAD_SENSITIVITIES). */
   vadSensitivity: VadSensitivityId;
+  /** Fala (padrão) ou música: letras cantadas, sem detector de fala, com um modelo Whisper. */
+  audioMode: AudioModeId;
+  /** Modelo local usado no modo música (só Whisper; ver MUSIC_STT_MODELS). */
+  musicModel: SttModelId;
   /** Último recurso quando LibreTranslate e Chrome falham. */
   translationFallback: 'local' | 'google' | 'none';
   /** Tamanho da fonte das legendas, em px. */
@@ -46,6 +50,8 @@ export const DEFAULT_OPTIONS: Options = {
   sttServerApiKey: '',
   sentenceSplit: 'normal',
   vadSensitivity: 'normal',
+  audioMode: 'speech',
+  musicModel: DEFAULT_MUSIC_STT_MODEL,
   translationFallback: 'local',
   fontSize: 18,
   displayMode: 'sidepanel',

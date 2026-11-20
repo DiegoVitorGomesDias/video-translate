@@ -8,8 +8,13 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** Modelos de STT do sherpa-onnx (baixados no primeiro uso para o armazenamento interno). */
-enum class SttModel(val id: String, val label: String, val url: String, val dirName: String, val sizeMb: Int) {
+enum class SttKind { MOONSHINE, WHISPER }
+
+/**
+ * Modelos de STT do sherpa-onnx (baixados no primeiro uso para o armazenamento interno).
+ * `sizeMb` é o download (o .tar.bz2 do Whisper traz também os pesos fp32, que não são usados).
+ */
+enum class SttModel(val id: String, val label: String, val url: String, val dirName: String, val sizeMb: Int, val kind: SttKind = SttKind.MOONSHINE) {
     MOONSHINE_TINY(
         "moonshine-tiny", "Moonshine tiny (padrão)",
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-tiny-en-int8.tar.bz2",
@@ -19,19 +24,56 @@ enum class SttModel(val id: String, val label: String, val url: String, val dirN
         "moonshine-base", "Moonshine base (mais preciso, mais lento)",
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-base-en-int8.tar.bz2",
         "sherpa-onnx-moonshine-base-en-int8", 251,
+    ),
+    WHISPER_BASE_EN(
+        "whisper-base.en", "Whisper base (inglês; padrão do modo música)",
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.en.tar.bz2",
+        "sherpa-onnx-whisper-base.en", 209, SttKind.WHISPER,
+    ),
+    WHISPER_SMALL_EN(
+        "whisper-small.en", "Whisper small (inglês; letras mais certas, 3 a 4x mais lento)",
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.en.tar.bz2",
+        "sherpa-onnx-whisper-small.en", 636, SttKind.WHISPER,
     );
+
+    /** Modelos oferecidos no modo fala (os Whisper processam janela fixa de 30 s: lentos para diálogo). */
+    val forSpeech: Boolean get() = kind == SttKind.MOONSHINE
+    /** Modelos oferecidos no modo música (o Moonshine é treinado só em fala e erra muito em canto). */
+    val forMusic: Boolean get() = kind == SttKind.WHISPER
 
     companion object {
         fun byId(id: String?) = entries.firstOrNull { it.id == id } ?: MOONSHINE_TINY
+        fun byIdOrNull(id: String?) = entries.firstOrNull { it.id == id }
     }
+}
+
+sealed class ModelFiles {
+    data class Moonshine(val dir: File) : ModelFiles()
+    data class Whisper(val encoder: File, val decoder: File, val tokens: File) : ModelFiles()
 }
 
 class ModelDownloader(private val context: Context) {
     fun modelDir(model: SttModel): File = File(context.filesDir, "models/${model.dirName}")
 
-    fun isReady(model: SttModel): Boolean {
+    fun isReady(model: SttModel): Boolean = modelFiles(model) != null
+
+    /** Arquivos do modelo já extraídos, ou null se faltar algum. */
+    fun modelFiles(model: SttModel): ModelFiles? {
         val d = modelDir(model)
-        return listOf("preprocess.onnx", "encode.int8.onnx", "uncached_decode.int8.onnx", "cached_decode.int8.onnx", "tokens.txt").all { File(d, it).length() > 0 }
+        return when (model.kind) {
+            SttKind.MOONSHINE -> {
+                val names = listOf("preprocess.onnx", "encode.int8.onnx", "uncached_decode.int8.onnx", "cached_decode.int8.onnx", "tokens.txt")
+                if (names.all { File(d, it).length() > 0 }) ModelFiles.Moonshine(d) else null
+            }
+            SttKind.WHISPER -> {
+                // Nomes seguem o padrão "<nome>-encoder.int8.onnx" (ex.: base.en-encoder.int8.onnx).
+                val files = d.listFiles() ?: return null
+                val encoder = files.firstOrNull { it.name.endsWith("-encoder.int8.onnx") && it.length() > 0 } ?: return null
+                val decoder = files.firstOrNull { it.name.endsWith("-decoder.int8.onnx") && it.length() > 0 } ?: return null
+                val tokens = files.firstOrNull { it.name.endsWith("-tokens.txt") && it.length() > 0 } ?: return null
+                ModelFiles.Whisper(encoder, decoder, tokens)
+            }
+        }
     }
 
     /**
@@ -78,6 +120,10 @@ class ModelDownloader(private val context: Context) {
                 val target = File(dest, entry.name)
                 if (!target.canonicalPath.startsWith(dest.canonicalPath)) continue // zip slip
                 if (entry.isDirectory) { target.mkdirs(); continue }
+                // Whisper: o pacote traz também os pesos fp32 (não usados) e wavs de teste; não gasta disco com eles.
+                val name = entry.name.substringAfterLast('/')
+                if (name.endsWith(".onnx") && !name.contains(".int8.") && entry.name.contains("whisper")) continue
+                if (entry.name.contains("/test_wavs/")) continue
                 target.parentFile?.mkdirs()
                 target.outputStream().use { tar.copyTo(it) }
             }

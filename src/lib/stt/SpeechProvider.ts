@@ -57,4 +57,10 @@ export interface SpeechProvider {
   attachTrack?(track: MediaStreamTrack): void;
   /** Termos (nomes, siglas) para influenciar o reconhecimento, quando o provedor aceita. */
   setPhrases?(terms: string[]): void;
+  /**
+   * Modo música: o prompt do Whisper deixa de levar as frases anteriores (um refrão repetido
+   * seria descartado como "eco" e letras alucinadas realimentariam o laço) e ganha uma
+   * dica de que o áudio é canto.
+   */
+  setMusicMode?(on: boolean): void;
 }

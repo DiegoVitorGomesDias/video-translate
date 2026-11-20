@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { listMicrophones, type MicDevice } from './capture';
-import { STT_MODELS } from '@/lib/stt/models';
+import { MUSIC_STT_MODELS, STT_MODELS } from '@/lib/stt/models';
 import { VAD_PROFILES, type VadProfile } from '@/lib/audio/vad';
+import { AUDIO_MODES, MUSIC_WINDOW, type AudioMode } from '@/lib/audio/music';
 import { LOCAL_MT_DOWNLOAD_MB, LibreTranslateProvider } from '@/lib/translate';
 import type { Settings } from './settings';
 import type { SttModelId } from '@/lib/messages';
@@ -51,7 +52,31 @@ export function SettingsPanel({ value, onSave, onClose }: { value: Settings; onS
       </select>
       <p className="hint">A Translator API do Chrome é usada automaticamente quando existir (Chrome Android recente).</p>
 
-      <label htmlFor="model">Modelo de transcrição</label>
+      <label htmlFor="audioMode">Modo de áudio</label>
+      <select id="audioMode" value={s.audioMode} onChange={(e) => update('audioMode', e.target.value as AudioMode)}>
+        {(Object.keys(AUDIO_MODES) as AudioMode[]).map((id) => (
+          <option key={id} value={id}>
+            {AUDIO_MODES[id].label}{id === 'speech' ? ' (padrão)' : ''}
+          </option>
+        ))}
+      </select>
+      {s.audioMode === 'music' && (
+        <>
+          <select id="musicModel" value={s.musicModel} onChange={(e) => update('musicModel', e.target.value as SttModelId)} aria-label="Modelo do modo música">
+            {STT_MODELS.filter((m) => MUSIC_STT_MODELS.includes(m.id)).map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label} (~{m.downloadMb.wasm}–{m.downloadMb.webgpu} MB)
+              </option>
+            ))}
+          </select>
+          <p className="hint">
+            Letras cantadas: sem detector de fala, janelas de ~{MUSIC_WINDOW.windowMs / 1000} s transcritas por um Whisper (o Moonshine não entende canto). Sem GPU o base já demora vários segundos por
+            janela; o small pode não acompanhar. Sem texto parcial. Para fone de ouvido, use o app Android.
+          </p>
+        </>
+      )}
+
+      <label htmlFor="model">Modelo de transcrição{s.audioMode === 'music' ? ' (modo fala)' : ''}</label>
       <select id="model" value={s.sttModel} onChange={(e) => update('sttModel', e.target.value as SttModelId)}>
         {STT_MODELS.map((m) => (
           <option key={m.id} value={m.id}>

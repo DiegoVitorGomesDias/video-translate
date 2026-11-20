@@ -298,10 +298,12 @@ async function startCapture(tab: chrome.tabs.Tab, options: Options, surface: Sta
       type: 'start-capture',
       streamId,
       tabId: tab.id,
-      sttModel: options.sttModel,
+      // Modo música usa o modelo Whisper escolhido para música, não o do modo fala.
+      sttModel: options.audioMode === 'music' ? options.musicModel : options.sttModel,
       sttEngine: options.sttEngine,
       vadProfile: options.sentenceSplit,
       vadSensitivity: options.vadSensitivity,
+      audioMode: options.audioMode,
       context: { tabTitle: tab.title ?? '', useTabContext: options.useTabContext, glossary: options.glossary, ignoredTerms: options.ignoredTerms },
       server: { url: options.sttServerUrl.trim(), format: options.sttServerFormat, model: options.sttServerModel.trim(), apiKey: options.sttServerApiKey.trim() },
     });

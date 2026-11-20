@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { DEFAULT_OPTIONS, loadOptions, originPattern, saveOptions, type Options } from '@/lib/options';
-import { STT_MODELS } from '@/lib/stt/models';
+import { MUSIC_STT_MODELS, STT_MODELS } from '@/lib/stt/models';
+import { AUDIO_MODES, MUSIC_WINDOW, type AudioMode } from '@/lib/audio/music';
 import { chromeSpeechAvailability, chromeSpeechInstall, type ChromeSpeechAvailability } from '@/lib/stt/chrome-speech';
 import { serverSpeechPing, serverSpeechProbe } from '@/lib/stt/server-speech';
 import { VAD_PROFILES, VAD_SENSITIVITIES, type VadProfile, type VadSensitivity } from '@/lib/audio/vad';
@@ -181,6 +182,8 @@ export function App() {
         sttModel: opts.sttModel,
         sentenceSplit: opts.sentenceSplit,
         vadSensitivity: opts.vadSensitivity,
+        audioMode: opts.audioMode,
+        musicModel: opts.musicModel,
         translationFallback: opts.translationFallback,
         fontSize: opts.fontSize,
         glossary: opts.glossary.trim(),
@@ -354,7 +357,35 @@ export function App() {
       </section>
 
       <section>
-        <h2>Modelo de transcrição local</h2>
+        <h2>Modo de áudio</h2>
+        {(Object.keys(AUDIO_MODES) as AudioMode[]).map((id) => (
+          <label key={id} className={`model ${opts.audioMode === id ? 'selected' : ''}`}>
+            <input type="radio" name="audioMode" value={id} checked={opts.audioMode === id} onChange={() => update('audioMode', id)} />
+            <span className="name">{AUDIO_MODES[id].label}{id === 'speech' ? ' (padrão)' : ''}</span>
+            <div className="desc">{AUDIO_MODES[id].description}</div>
+          </label>
+        ))}
+        {opts.audioMode === 'music' && (
+          <div style={{ marginLeft: 24, marginTop: 10 }}>
+            <label htmlFor="musicModel">Modelo do modo música</label>
+            <select id="musicModel" value={opts.musicModel} onChange={(e) => update('musicModel', e.target.value as SttModelId)}>
+              {STT_MODELS.filter((m) => MUSIC_STT_MODELS.includes(m.id)).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label} · ~{m.downloadMb.webgpu} MB (GPU) · {m.latency}
+                </option>
+              ))}
+            </select>
+            <p className="hint">
+              Só modelos Whisper: foram treinados também com canto, e o Moonshine só com fala. Janelas de ~{MUSIC_WINDOW.windowMs / 1000} s (até {MUSIC_WINDOW.maxWindowMs / 1000} s), cortadas no ponto mais
+              silencioso; cada janela vira um verso. A legenda chega alguns segundos depois do verso e não há texto parcial. O small é o equilíbrio na GPU; o base é mais rápido e erra mais; o turbo é o
+              melhor com música, mas lento sem shader-f16. Com o motor "Servidor local (Docker)" o modelo é o do servidor. A separação de frases e a sensibilidade abaixo não se aplicam neste modo.
+            </p>
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h2>Modelo de transcrição local{opts.audioMode === 'music' ? ' (modo fala)' : ''}</h2>
         {STT_MODELS.map((m) => (
           <label key={m.id} className={`model ${opts.sttModel === m.id ? 'selected' : ''}`}>
             <input type="radio" name="sttModel" value={m.id} checked={opts.sttModel === m.id} onChange={() => update('sttModel', m.id as SttModelId)} />

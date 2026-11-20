@@ -21,6 +21,7 @@ import { correctTranscript, extractTermsFromTitle, mergeTerms, parseGlossary, te
 import { modelLabelFor } from '@/lib/stt/models';
 import { collapseCharRuns } from '@/lib/stt/repetition';
 import { VAD_PROFILES, VAD_SENSITIVITIES } from '@/lib/audio/vad';
+import { MUSIC_WINDOW } from '@/lib/audio/music';
 
 interface Card extends Sentence {
   pt?: string;
@@ -403,8 +404,13 @@ export function App() {
 
   // Linha de configuração aplicada (modelo + backend, separação) e aviso se as opções salvas diferem.
   const configLine = useMemo(() => {
-    const cfg = applied ?? (options ? { sttModel: options.sttModel, vadProfile: options.sentenceSplit, vadSensitivity: options.vadSensitivity } : null);
+    const cfg =
+      applied ??
+      (options
+        ? { sttModel: options.audioMode === 'music' ? options.musicModel : options.sttModel, vadProfile: options.sentenceSplit, vadSensitivity: options.vadSensitivity, audioMode: options.audioMode }
+        : null);
     if (!cfg) return null;
+    const music = cfg.audioMode === 'music';
     const active = cfg.activeEngine ?? cfg.sttEngine ?? 'local';
     const chrome = active === 'chrome';
     const server = active === 'server';
@@ -415,12 +421,20 @@ export function App() {
     const modelLabel = chrome ? 'Chrome no dispositivo' : server ? `Servidor local (${stt?.model ?? 'whisper'})` : modelLabelFor(stt?.state === 'ready' ? stt.model : undefined, cfg.sttModel);
     const fellBack = (cfg.sttEngine ?? 'local') !== 'local' && cfg.activeEngine === 'local';
     const fellBackLabel = cfg.sttEngine === 'chrome' ? ' (Chrome indisponível)' : ' (servidor indisponível)';
-    const vadLabel = chrome ? '' : cfg.vadEngine === 'silero' ? ' · Silero' : cfg.vadEngine === 'energy' ? ' · energia' : '';
+    const vadLabel = chrome || music ? '' : cfg.vadEngine === 'silero' ? ' · Silero' : cfg.vadEngine === 'energy' ? ' · energia' : '';
+    const wantedModel = options?.audioMode === 'music' ? options.musicModel : options?.sttModel;
     const changed =
-      !!applied && !!options && (options.sttModel !== applied.sttModel || options.sentenceSplit !== applied.vadProfile || options.vadSensitivity !== (applied.vadSensitivity ?? 'normal') || options.sttEngine !== (applied.sttEngine ?? 'local'));
+      !!applied &&
+      !!options &&
+      (wantedModel !== applied.sttModel ||
+        options.audioMode !== (applied.audioMode ?? 'speech') ||
+        (!music && (options.sentenceSplit !== applied.vadProfile || options.vadSensitivity !== (applied.vadSensitivity ?? 'normal'))) ||
+        options.sttEngine !== (applied.sttEngine ?? 'local'));
     return {
       model: `${modelLabel}${backend ? ` · ${backend}` : ''}${fellBack ? fellBackLabel : ''}`,
-      split: `Separação: ${vp.label} (${vp.silenceMs / 1000} s / ${vp.maxSegmentMs / 1000} s)${vadLabel} · Sensibilidade: ${vs.label.toLowerCase()}`,
+      split: music
+        ? `Modo música: janelas de ~${MUSIC_WINDOW.windowMs / 1000} s (até ${MUSIC_WINDOW.maxWindowMs / 1000} s), sem detector de fala`
+        : `Separação: ${vp.label} (${vp.silenceMs / 1000} s / ${vp.maxSegmentMs / 1000} s)${vadLabel} · Sensibilidade: ${vs.label.toLowerCase()}`,
       changed,
       isApplied: !!applied,
     };
