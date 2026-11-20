@@ -55,8 +55,10 @@ export interface SpeechProvider {
    */
   readonly consumesStream?: boolean;
   attachTrack?(track: MediaStreamTrack): void;
-  /** Termos (nomes, siglas) para influenciar o reconhecimento, quando o provedor aceita. */
+  /** Termos (nomes, siglas, palavras-chave) para influenciar o reconhecimento, quando o provedor aceita. */
   setPhrases?(terms: string[]): void;
+  /** Assunto do vídeo em texto corrido (título, descrição, palavras-chave) para o prompt do Whisper. */
+  setTopic?(topic: string): void;
   /** Modo música: dica de canto no prompt do Whisper e filtro de eco só contra o verso anterior (refrões repetem). */
   setMusicMode?(on: boolean): void;
   /** Esquece as frases anteriores usadas como contexto (prompt do Whisper, filtro de eco): novo vídeo. */

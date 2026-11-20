@@ -261,12 +261,18 @@ export function App() {
         <h2>Contexto do vídeo</h2>
         <label className="model" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input type="checkbox" checked={opts.useTabContext} onChange={(e) => update('useTabContext', e.target.checked)} />
-          <span>Usar o título da aba como contexto (nomes do vídeo)</span>
+          <span>Usar o título e a página da aba como contexto (nomes e assunto do vídeo)</span>
         </label>
         <p className="hint">
-          Nomes tirados do título (ex.: "Prime Video: Dr. House" → <code>Dr. House</code>, <code>House</code>) ficam sem traduzir ("House está atrasado", não "A casa está atrasada") e
-          corrigem a transcrição quando o modelo de fala erra o nome (ex.: "Cutty" → "Cuddy"). A janela de legendas mostra os nomes detectados e deixa remover ou adicionar.
+          Do título, da descrição, do canal e das tags da página (YouTube, Prime Video, Netflix…) saem os <b>nomes</b> (ex.: "Prime Video: Dr. House" → <code>Dr. House</code>,{' '}
+          <code>House</code>), que ficam sem traduzir ("House está atrasado", não "A casa está atrasada") e corrigem a transcrição quando o modelo de fala erra o nome (ex.: "Cutty" →
+          "Cuddy"), e o <b>assunto</b> (título, canal, resumo da descrição, palavras-chave), que entra no prompt do Whisper e nas phrases do reconhecimento do Chrome junto com as palavras
+          que mais se repetem nas últimas frases, para o modelo acertar os termos do tema. A janela de legendas mostra os dois e deixa remover ou adicionar. A página é lida no clique no
+          ícone e relida no botão "limpar" e quando o vídeo muda; os tradutores frase a frase não recebem o assunto, só os nomes protegidos.
         </p>
+        <label htmlFor="topic">Assunto do vídeo (opcional, uma frase em inglês)</label>
+        <input id="topic" type="text" value={opts.topic} onChange={(e) => update('topic', e.target.value)} placeholder="Ex.: A lecture on linear algebra and eigenvalues." style={{ width: '100%', font: 'inherit' }} />
+        <p className="hint">Somado ao assunto detectado na página; útil quando a página não diz nada sobre o vídeo (player genérico) ou para fixar o tema de uma sessão.</p>
         <label htmlFor="glossary">Glossário fixo (um termo por linha ou separados por vírgula)</label>
         <textarea id="glossary" rows={4} value={opts.glossary} onChange={(e) => update('glossary', e.target.value)} placeholder={'Cuddy\nWilson\nForeman'} style={{ width: '100%', font: 'inherit' }} />
         <p className="hint">Vale em todas as capturas, somado aos nomes do título. Use para personagens, siglas e termos técnicos que devem ficar como estão. Só casa palavra inteira com a mesma capitalização.</p>

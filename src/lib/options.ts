@@ -31,8 +31,10 @@ export interface Options {
   fontSize: number;
   /** Painel lateral do Chrome (padrão), painel sobreposto à página ou janela separada. */
   displayMode: DisplayMode;
-  /** Tirar nomes do título da aba para usar como contexto (tradução e transcrição). */
+  /** Tirar nomes e assunto do título e da página da aba para usar como contexto (tradução e transcrição). */
   useTabContext: boolean;
+  /** Assunto do vídeo digitado pelo usuário (uma frase), somado ao detectado na página. */
+  topic: string;
   /** Glossário fixo do usuário: nomes/termos a manter, um por linha (ou separados por vírgula). */
   glossary: string;
   /** Termos (em minúsculas) que o usuário tirou do contexto no viewer: não voltam nas próximas capturas. */
@@ -59,6 +61,7 @@ export const DEFAULT_OPTIONS: Options = {
   fontSize: 18,
   displayMode: 'sidepanel',
   useTabContext: true,
+  topic: '',
   glossary: '',
   ignoredTerms: [],
   readingDirection: 'top-down',

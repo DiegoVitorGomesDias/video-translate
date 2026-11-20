@@ -18,7 +18,7 @@ import { SentenceSegmenter, normalize, type Sentence } from '@/lib/segmenter';
 import { saveOptions, watchOptions, type Options } from '@/lib/options';
 import { createTranslator, type LocalOpusStatus, type TranslatorSelection } from '@/lib/translate';
 import { ContextualTranslationProvider } from '@/lib/translate/contextual';
-import { correctTranscript, extractTermsFromTitle, mergeTerms, parseGlossary, termPattern } from '@/lib/context';
+import { SPOKEN_WINDOW, buildVideoContext, correctTranscript, parseGlossary, termPattern } from '@/lib/context';
 import { modelLabelFor } from '@/lib/stt/models';
 import { collapseCharRuns } from '@/lib/stt/repetition';
 import { VAD_PROFILES, VAD_SENSITIVITIES } from '@/lib/audio/vad';
@@ -62,14 +62,45 @@ export function App() {
   /** Termos de contexto atuais (lidos pelo tradutor e pela correção da transcrição). */
   const termsRef = useRef<string[]>([]);
 
-  // ---- Contexto: nomes do título da aba + glossário do usuário ----
-  const autoTerms = useMemo(() => (options?.useTabContext === false ? [] : extractTermsFromTitle(capture.tabTitle ?? '')), [capture.tabTitle, options?.useTabContext]);
+  // ---- Contexto: título e metadados da aba (descrição, canal, tags) + glossário e assunto
+  // das opções + palavras-chave do que está sendo dito (últimas frases). Mesma montagem que
+  // o offscreen faz para o prompt do Whisper (buildVideoContext).
   const manualTerms = useMemo(() => parseGlossary(options?.glossary ?? ''), [options?.glossary]);
   // Termos removidos ficam em options.ignoredTerms: antes eram só estado da página e voltavam
   // ao reiniciar a extensão.
   const ignoredTerms = options?.ignoredTerms ?? [];
-  const terms = useMemo(() => mergeTerms(manualTerms, autoTerms).filter((t) => !ignoredTerms.includes(t.toLowerCase())), [manualTerms, autoTerms, ignoredTerms]);
+  // Só as últimas frases contam (o assunto acompanha o vídeo); recalcula quando elas mudam.
+  const spokenKey = cards
+    .slice(-SPOKEN_WINDOW)
+    .map((c) => c.text)
+    .join('\n');
+  const videoContext = useMemo(
+    () =>
+      buildVideoContext({
+        tabTitle: capture.tabTitle ?? '',
+        page: capture.page,
+        useTabContext: options?.useTabContext !== false,
+        glossary: options?.glossary ?? '',
+        ignoredTerms,
+        topic: options?.topic ?? '',
+        spokenTexts: spokenKey ? spokenKey.split('\n') : [],
+      }),
+    [capture.tabTitle, capture.page, options?.useTabContext, options?.glossary, options?.topic, ignoredTerms, spokenKey],
+  );
+  /** Nomes a manter na tradução e corrigir na transcrição. */
+  const terms = videoContext.names;
   termsRef.current = terms;
+  const topicChips = [...videoContext.keywords.map((k) => ({ text: k, spoken: false })), ...videoContext.spoken.map((k) => ({ text: k, spoken: true }))];
+  const hasTopic = Boolean(videoContext.channel || videoContext.description || videoContext.topic || topicChips.length);
+  const topicTitle = [
+    videoContext.topic && `Assunto (Opções): ${videoContext.topic}`,
+    videoContext.title && `Título: ${videoContext.title}`,
+    videoContext.channel && `Canal: ${videoContext.channel}`,
+    videoContext.description && `Descrição: ${videoContext.description}`,
+    'Entra no prompt do Whisper (e nas phrases do reconhecimento do Chrome) para situar a transcrição. Palavras em itálico vêm do que está sendo dito.',
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   // ---- Opções (fonte, LibreTranslate) ----
   useEffect(() => watchOptions(setOptions), []);
@@ -511,7 +542,7 @@ export function App() {
             className="link"
             onClick={clear}
             disabled={cards.length === 0 && !partial && !segmenter.current.pending}
-            title="Apagar as legendas e recomeçar o contexto: frases anteriores esquecidas e nomes relidos do título da aba (para quando começa outro vídeo)"
+            title="Apagar as legendas e recomeçar o contexto: frases anteriores esquecidas, título e metadados da aba relidos (para quando começa outro vídeo)"
           >
             limpar
           </button>
@@ -536,18 +567,18 @@ export function App() {
           </div>
         )}
         <div className="context-line">
-          <span className="context-label" title="Nomes do título da aba e do glossário: ficam sem traduzir (House não vira casa) e corrigem a transcrição">
-            contexto:
+          <span className="context-label" title="Nomes do título, da descrição e das tags da página e do glossário: ficam sem traduzir (House não vira casa), corrigem a transcrição e entram no prompt do Whisper">
+            nomes:
           </span>
           {terms.map((t) => (
-            <span className="chip term" key={t} title={manualTerms.some((m) => m.toLowerCase() === t.toLowerCase()) ? 'Do glossário (Opções). Clique no × para tirar do contexto (vale nas próximas capturas também).' : `Tirado do título "${capture.tabTitle ?? ''}". Clique no × para tirar do contexto (vale nas próximas capturas também).`}>
+            <span className="chip term" key={t} title={manualTerms.some((m) => m.toLowerCase() === t.toLowerCase()) ? 'Do glossário (Opções). Clique no × para tirar do contexto (vale nas próximas capturas também).' : `Tirado do título ou da página "${capture.tabTitle ?? ''}". Clique no × para tirar do contexto (vale nas próximas capturas também).`}>
               {t}
               <button className="x" onClick={() => removeTerm(t)} aria-label={`Remover ${t}`}>
                 ×
               </button>
             </span>
           ))}
-          {terms.length === 0 && !addingTerm && <span className="chip muted">nenhum nome no título</span>}
+          {terms.length === 0 && !addingTerm && <span className="chip muted">nenhum nome na página</span>}
           {addingTerm ? (
             <input
               className="term-input"
@@ -570,6 +601,38 @@ export function App() {
             </button>
           )}
         </div>
+        {hasTopic && (
+          <div className="context-line topic-line">
+            <span className="context-label" title={topicTitle}>
+              assunto:
+            </span>
+            {videoContext.channel && (
+              <span className="chip topic source" title={`Canal/autor da página. ${videoContext.description ? `Descrição: ${videoContext.description}` : ''}`}>
+                {videoContext.channel}
+              </span>
+            )}
+            {!videoContext.channel && videoContext.title && (
+              <span className="chip topic source" title={videoContext.description ? `Descrição: ${videoContext.description}` : 'Título da aba'}>
+                {videoContext.title.length > 40 ? `${videoContext.title.slice(0, 40)}…` : videoContext.title}
+              </span>
+            )}
+            {videoContext.topic && (
+              <span className="chip topic source" title="Assunto digitado nas Opções">
+                {videoContext.topic.length > 40 ? `${videoContext.topic.slice(0, 40)}…` : videoContext.topic}
+              </span>
+            )}
+            {topicChips.map((k) => (
+              <span className={`chip topic ${k.spoken ? 'spoken' : ''}`} key={k.text} title={k.spoken ? 'Palavra repetida nas últimas frases: entra no contexto da transcrição' : 'Palavra-chave da página (tags, descrição, título). Clique no × para tirar do contexto.'}>
+                {k.text}
+                {!k.spoken && (
+                  <button className="x" onClick={() => removeTerm(k.text)} aria-label={`Remover ${k.text}`}>
+                    ×
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
         {stt?.state === 'loading' && stt.progress !== undefined && <ProgressBar value={stt.progress} label="modelo" title={stt.message} />}
         {chromeDownload !== null && <ProgressBar value={chromeDownload * 100} label="tradutor do Chrome" />}
         {translator?.kind === 'local' && localStatus?.state === 'loading' && localStatus.progress !== undefined && (
