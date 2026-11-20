@@ -69,6 +69,7 @@ import com.videotranslate.app.audio.MusicWindow
 import com.videotranslate.app.audio.VadProfile
 import com.videotranslate.app.audio.VadSensitivity
 import com.videotranslate.app.stt.SttModel
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -265,9 +266,8 @@ fun SettingsDialog(initial: Settings, onDismiss: () -> Unit, onSave: (Settings) 
                 Text("Painel flutuante", style = MaterialTheme.typography.labelLarge)
                 Row(verticalAlignment = Alignment.CenterVertically) { Switch(s.overlayEnabled, { s = s.copy(overlayEnabled = it) }); Spacer(Modifier.width(8.dp)); Text("Mostrar sobre outros apps") }
                 Text("Opacidade: ${(s.overlayOpacity * 100).toInt()}%"); Slider(s.overlayOpacity, { s = s.copy(overlayOpacity = it) }, valueRange = 0.3f..1f)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Frases no painel: "); listOf(1, 2, 3, 4, 5).forEach { n -> RadioButton(s.overlayLines == n, { s = s.copy(overlayLines = n) }); Text("$n ") }
-                }
+                // Slider (1 a 5) no lugar da fileira de rádios, que não cabia na largura do diálogo.
+                Text("Frases no painel: ${s.overlayLines}"); Slider(value = s.overlayLines.toFloat(), onValueChange = { s = s.copy(overlayLines = it.roundToInt().coerceIn(1, 5)) }, valueRange = 1f..5f, steps = 3)
             }
         },
     )
