@@ -18,6 +18,7 @@ import java.io.File
  */
 class SherpaRecognizer(files: ModelFiles, numThreads: Int = 2) : AutoCloseable {
     private val recognizer: OfflineRecognizer
+    @Volatile private var closed = false
 
     init {
         val modelConfig = when (files) {
@@ -57,6 +58,7 @@ class SherpaRecognizer(files: ModelFiles, numThreads: Int = 2) : AutoCloseable {
 
     @Synchronized
     fun transcribe(samples: FloatArray, sampleRate: Int = 16000): String {
+        if (closed) return ""
         val stream = recognizer.createStream()
         try {
             stream.acceptWaveform(samples, sampleRate)
@@ -67,5 +69,7 @@ class SherpaRecognizer(files: ModelFiles, numThreads: Int = 2) : AutoCloseable {
         }
     }
 
-    override fun close() = recognizer.release()
+    /** Sincronizado com `transcribe`: liberar o nativo no meio de um decode derrubava o processo. */
+    @Synchronized
+    override fun close() { if (!closed) { closed = true; recognizer.release() } }
 }
