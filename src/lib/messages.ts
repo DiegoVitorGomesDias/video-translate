@@ -206,8 +206,7 @@ export interface CaptureState {
   windowId?: number | null;
   /** Como o viewer está sendo mostrado nesta captura (undefined = nenhum viewer aberto). */
   mode?: DisplayMode;
-  /** Da última captura (parada): para "Iniciar" de novo no mesmo lugar sem abrir outro viewer. */
-  lastTabId?: number | null;
+  /** Da última captura (parada): para "Iniciar" de novo no mesmo viewer sem abrir outro. */
   lastWindowId?: number | null;
   lastMode?: DisplayMode;
 }
