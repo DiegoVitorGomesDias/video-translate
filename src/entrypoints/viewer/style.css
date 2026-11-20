@@ -57,6 +57,12 @@ body { background: var(--bg); color: var(--fg); }
 .chip.term .x { border: none; background: none; color: var(--muted); padding: 0 2px; font-size: 13px; line-height: 1; cursor: pointer; }
 .chip.term .x:hover { color: var(--danger); }
 .chip.muted { opacity: .7; font-style: italic; }
+.topic-line { margin-top: 3px; }
+.chip.topic { color: var(--muted); border-color: var(--border); display: inline-flex; align-items: center; gap: 4px; padding-right: 4px; }
+.chip.topic.source { color: var(--fg); border-style: dashed; padding-right: 8px; }
+.chip.topic.spoken { font-style: italic; padding-right: 8px; }
+.chip.topic .x { border: none; background: none; color: var(--muted); padding: 0 2px; font-size: 13px; line-height: 1; cursor: pointer; }
+.chip.topic .x:hover { color: var(--danger); }
 .chip.add { cursor: pointer; color: var(--accent); background: none; border-style: dashed; }
 .chip.add:hover { border-color: var(--accent); }
 .term-input { font: inherit; font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--accent); background: var(--card); color: var(--fg); width: 140px; }

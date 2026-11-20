@@ -849,3 +849,371 @@ export function correctTranscript(text: string, terms: string[]): string {
   }
   return result;
 }
+
+// ---- Assunto do vídeo ----
+// O contexto não é só nomes: o assunto (descrição da página, canal, tags) e o que está
+// sendo dito (palavras-chave das últimas frases) situam o Whisper (prompt), o
+// reconhecimento do Chrome (phrases) e o viewer. Os tradutores frase a frase não têm
+// onde receber assunto; para eles valem os nomes/termos protegidos (ver contextual.ts).
+
+/** Metadados da página do vídeo, lidos pelo content script page-context (ver pageContextFromMeta). */
+export interface PageContext {
+  /** Descrição/sinopse (meta description, og:description, JSON-LD, descrição do YouTube). */
+  description: string;
+  /** Canal/autor (YouTube) ou vazio. */
+  channel: string;
+  /** Nome do site (og:site_name) ou vazio. */
+  siteName: string;
+  /** Tags/palavras-chave declaradas pela página (og:video:tag, meta keywords, JSON-LD keywords). */
+  tags: string[];
+}
+
+export const EMPTY_PAGE: PageContext = { description: '', channel: '', siteName: '', tags: [] };
+
+/** Entrada crua do content script: metas (name/property/itemprop → content), JSON-LD e textos do DOM. */
+export interface RawPageMeta {
+  metas: { key: string; content: string }[];
+  ldJson: string[];
+  /** Descrição visível (ex.: #description do YouTube), quando houver. */
+  domDescription?: string;
+  /** Canal visível (ex.: ytd-channel-name), quando houver. */
+  domChannel?: string;
+}
+
+const MAX_DESCRIPTION = 1500;
+const MAX_TAGS = 20;
+
+function metaValues(metas: RawPageMeta['metas'], ...keys: string[]): string[] {
+  const out: string[] = [];
+  for (const k of keys) for (const m of metas) if (m.key.toLowerCase() === k && m.content.trim()) out.push(m.content.trim());
+  return out;
+}
+
+function ldObjects(ldJson: string[]): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  const visit = (v: unknown) => {
+    if (Array.isArray(v)) v.forEach(visit);
+    else if (v && typeof v === 'object') {
+      const o = v as Record<string, unknown>;
+      out.push(o);
+      if (Array.isArray(o['@graph'])) visit(o['@graph']);
+    }
+  };
+  for (const s of ldJson) {
+    try {
+      visit(JSON.parse(s));
+    } catch {
+      /* JSON-LD inválido: ignora */
+    }
+  }
+  return out;
+}
+
+function ldString(v: unknown): string {
+  if (typeof v === 'string') return v.trim();
+  if (Array.isArray(v)) return v.map(ldString).filter(Boolean).join(', ');
+  if (v && typeof v === 'object') return ldString((v as Record<string, unknown>).name);
+  return '';
+}
+
+/** Monta o PageContext a partir dos metadados crus (puro, testável sem DOM). */
+export function pageContextFromMeta(raw: RawPageMeta): PageContext {
+  const ld = ldObjects(raw.ldJson);
+  const video = ld.find((o) => /VideoObject|Movie|TVEpisode|Episode|Clip/.test(String(o['@type'] ?? ''))) ?? ld.find((o) => typeof o.description === 'string');
+  const descriptions = [
+    ...metaValues(raw.metas, 'og:description', 'twitter:description', 'description'),
+    ldString(video?.description),
+    raw.domDescription?.trim() ?? '',
+  ].filter(Boolean);
+  // A mais longa costuma ser a completa (a meta description do YouTube é cortada em ~160 caracteres).
+  const description = (descriptions.sort((a, b) => b.length - a.length)[0] ?? '').replace(/\s+/g, ' ').slice(0, MAX_DESCRIPTION);
+  const channel = (raw.domChannel?.trim() || metaValues(raw.metas, 'author', 'article:author')[0] || ldString(video?.author) || '').slice(0, 80);
+  const siteName = (metaValues(raw.metas, 'og:site_name', 'application-name')[0] ?? '').slice(0, 60);
+  const tags: string[] = [];
+  const addTag = (t: string) => {
+    const s = t.replace(/\s+/g, ' ').trim();
+    if (s.length < 2 || s.length > 50 || tags.length >= MAX_TAGS) return;
+    if (!tags.some((x) => x.toLowerCase() === s.toLowerCase())) tags.push(s);
+  };
+  for (const t of metaValues(raw.metas, 'og:video:tag', 'video:tag', 'article:tag')) addTag(t);
+  for (const list of [...metaValues(raw.metas, 'keywords', 'news_keywords'), ldString(video?.keywords ?? video?.genre)]) for (const t of list.split(/[,;|]+/)) addTag(t);
+  return { description, channel, siteName, tags };
+}
+
+/** As ~800 palavras mais frequentes: param a extração de palavras-chave da fala (as demais, repetidas, contam). */
+const KEYWORD_STOP: ReadonlySet<string> = new Set(`${CORE_WORDS_TEXT.split(/\s+/).filter(Boolean).slice(0, 800).join(' ')} ${TITLE_WORDS}`.split(/\s+/).filter(Boolean));
+
+/** Palavras de preenchimento da fala que não dizem nada sobre o assunto. */
+const FILLERS = new Set(['yeah', 'okay', 'gonna', 'wanna', 'gotta', 'alright', 'kinda', 'sorta', 'dunno', 'thing', 'things', 'stuff', 'guys', 'maybe', 'actually', 'basically', 'literally', 'anyway', 'anyways', 'really', 'pretty', 'little', 'something', 'anything', 'everything', 'nothing', 'someone', 'everyone', 'somebody', 'everybody', 'nobody', 'whatever', 'please', 'thanks', 'thank', 'sorry', 'hello', 'youtube', 'video', 'subscribe', 'channel', 'watch', 'watching', 'episode', 'season', 'official', 'trailer', 'music', 'lyrics', 'https', 'http', 'www']);
+
+function keywordWords(text: string): string[] {
+  const out: string[] = [];
+  const re = /[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu;
+  for (const m of text.matchAll(re)) {
+    const w = m[0].replace(/^['’-]+|['’-]+$/g, '');
+    if (w.length >= 4 && (w.match(/\p{L}/gu)?.length ?? 0) >= 3) out.push(w);
+  }
+  return out;
+}
+
+/**
+ * Palavra que pode caracterizar o assunto. `strict` (descrição, tags: uma menção basta) exclui
+ * as 2.000 mais comuns; na fala (só repetidas contam) bastam as ~800 mais comuns de fora,
+ * para "patient", "matrix" ou "engine" repetidos contarem.
+ */
+function isTopicWord(word: string, strict: boolean): boolean {
+  const low = word.toLowerCase();
+  if (low.length < 4 || FILLERS.has(low) || /^\d+$/.test(low)) return false;
+  if (strict ? CORE_WORDS.has(low) : KEYWORD_STOP.has(low)) return false;
+  if (/^(.)\1+$/u.test(low)) return false; // "hhhh"
+  return true;
+}
+
+/**
+ * Palavras-chave do assunto a partir de textos (descrição, tags, frases transcritas):
+ * palavras fora das 2.000 mais comuns, por frequência; empate favorece as raras (fora
+ * das 5.500) e as mais longas. Flexões simples ("patients"/"patient") contam juntas.
+ */
+export function extractKeywords(texts: string[], limit = 10, minCount = 1): string[] {
+  const counts = new Map<string, { count: number; form: string; rare: boolean }>();
+  const strict = minCount <= 1;
+  const stem = (w: string) => {
+    const l = w.toLowerCase().replace(/[’']s$/, '');
+    if (l.length > 6 && l.endsWith('ies')) return l.slice(0, -3) + 'y';
+    if (l.length > 6 && /(ss|sh|ch|x|z)es$/.test(l)) return l.slice(0, -2);
+    for (const suf of ['s', 'ing', 'ed']) {
+      if (l.length > suf.length + 3 && l.endsWith(suf) && !l.endsWith('ss')) return l.slice(0, -suf.length);
+    }
+    return l;
+  };
+  for (const text of texts) {
+    for (const w of keywordWords(text)) {
+      if (!isTopicWord(w, strict)) continue;
+      const key = stem(w);
+      const cur = counts.get(key);
+      const rare = !COMMON_WORDS.has(w.toLowerCase());
+      if (cur) {
+        cur.count++;
+        // Prefere a forma mais curta/comum (singular) e a com maiúscula se houver.
+        if (w.length < cur.form.length || (/^\p{Lu}/u.test(w) && !/^\p{Lu}/u.test(cur.form))) cur.form = w;
+      } else counts.set(key, { count: 1, form: w, rare });
+    }
+  }
+  return [...counts.values()]
+    .filter((c) => c.count >= minCount)
+    .sort((a, b) => b.count - a.count || Number(b.rare) - Number(a.rare) || b.form.length - a.form.length || a.form.localeCompare(b.form))
+    .slice(0, limit)
+    .map((c) => c.form);
+}
+
+/** Tira URLs, hashtags, emojis e chamadas ("Subscribe…", "Follow us…") da descrição. */
+export function cleanDescription(text: string, maxChars = 280): string {
+  const lines = splitSentences(
+    text
+      .replace(/https?:\/\/\S+|www\.\S+/gi, ' ')
+      .replace(/#[\p{L}\p{N}_]+/gu, ' ')
+      .replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, ' '),
+  )
+    .map((l) => l.replace(/\s+/g, ' ').trim())
+    .filter(
+      (l) =>
+        l.length >= 12 &&
+        l.split(' ').length >= 3 &&
+        !/[:：]$/.test(l) &&
+        !/^(subscribe|follow|like|share|join|check out|watch|download|buy|get|use code|sign up|visit|click|listen|stream|shop|more videos|timestamps|chapters|credits|help fund|support (me|us|the)|become a|patreon|merch|discord|instagram|twitter|facebook|tiktok)\b/i.test(l) &&
+        !/^\d{1,2}:\d{2}/.test(l),
+    );
+  let out = '';
+  for (const l of lines) {
+    if (out && out.length + l.length + 1 > maxChars) break;
+    out = out ? `${out} ${l}` : l;
+    if (out.length >= maxChars) break;
+  }
+  if (out.length > maxChars) {
+    out = out.slice(0, maxChars);
+    const cut = Math.max(out.lastIndexOf('. '), out.lastIndexOf(', '), out.lastIndexOf(' '));
+    if (cut > maxChars * 0.5) out = out.slice(0, cut);
+    out = out.replace(/[\s,;:]+$/, '');
+    if (!/[.!?]$/.test(out)) out += '.';
+  }
+  return out;
+}
+
+/**
+ * Nomes próprios em prosa (descrição do vídeo): sequências com maiúscula fora do início
+ * da frase (ou no início, se tiverem 2+ palavras incomuns), com honoríficos e conectores.
+ */
+export function extractNamesFromText(text: string, limit = 12): string[] {
+  const out: string[] = [];
+  const add = (term: string) => {
+    const t = term.trim();
+    if (t.length < 2 || /^\d+$/.test(t) || out.length >= limit) return;
+    if (!out.some((x) => x.toLowerCase() === t.toLowerCase())) out.push(t);
+  };
+  const clean = text.replace(/https?:\/\/\S+|www\.\S+|#[\p{L}\p{N}_]+|@[\p{L}\p{N}_]+/giu, ' ');
+  for (const sentence of splitSentences(clean)) {
+    const tokens = tokenize(sentence);
+    // Em prosa, "Paris and Gotham" são dois nomes (em títulos, "Jim and Pam" pode ser um).
+    const runs = capitalizedRuns(tokens).flatMap((run) => splitAt(run, (t) => /^(and|&|e|y)$/i.test(t.text)));
+    for (const run of runs) {
+      const meaningful = run.filter((t) => !CONNECTORS.has(t.text.toLowerCase()) && !isHonorific(t));
+      if (meaningful.length === 0) continue;
+      const hasHon = meaningful.length !== run.filter((t) => !CONNECTORS.has(t.text.toLowerCase())).length;
+      const atStart = run[0] === tokens[0];
+      // Início da frase: a maiúscula é da frase. Só vale com honorífico ou 2+ palavras incomuns.
+      if (atStart && !hasHon) {
+        const uncommon = meaningful.filter((t) => !isCommon(t) && !isMeta(t));
+        if (uncommon.length < 2) continue;
+        // "Hugh Laurie stars" → a sequência começa na frase; tira palavras comuns do início.
+        let r = run;
+        while (r.length && (isCommon(r[0]!) || CONNECTORS.has(r[0]!.text.toLowerCase()))) r = r.slice(1);
+        if (r.length === 0) continue;
+        add(r.map((t) => t.text).join(' '));
+        continue;
+      }
+      if (meaningful.every((t) => isMeta(t))) continue; // "Season 2", "Official Trailer"
+      if (meaningful.length === 1 && isCommon(meaningful[0]!) && !hasHon) continue; // "I", "God", "English"
+      add(run.map((t) => t.text).join(' '));
+      if (hasHon) add(meaningful.map((t) => t.text).join(' '));
+      if (meaningful.length >= 2 && meaningful.length <= 3) for (const t of meaningful) if (t.core.length >= 3 && !isCommon(t)) add(t.text);
+    }
+  }
+  return out;
+}
+
+function splitAt<T>(items: T[], isSeparator: (item: T) => boolean): T[][] {
+  const out: T[][] = [];
+  let cur: T[] = [];
+  for (const it of items) {
+    if (isSeparator(it)) {
+      if (cur.length) out.push(cur);
+      cur = [];
+    } else cur.push(it);
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
+
+/** Frases de um texto; "Dr." e iniciais ("J. K.") não fecham frase. */
+function splitSentences(text: string): string[] {
+  const out: string[] = [];
+  for (const piece of text.split(/\n+|\s+[-|–—·•]\s+/)) {
+    let cur = '';
+    for (const part of piece.split(/(?<=[.!?])\s+/)) {
+      cur = cur ? `${cur} ${part}` : part;
+      const last = cur.split(/\s+/).pop() ?? '';
+      if (HONORIFICS.has(last.toLowerCase()) || /^\p{Lu}\.$/u.test(last)) continue;
+      out.push(cur);
+      cur = '';
+    }
+    if (cur) out.push(cur);
+  }
+  return out;
+}
+
+/** Tudo que o viewer, o offscreen e os motores de fala usam como contexto do vídeo. */
+export interface VideoContext {
+  /** Título limpo (sem site/contadores), para mostrar e para o prompt. */
+  title: string;
+  channel: string;
+  /** Descrição resumida (até ~280 caracteres), já limpa. */
+  description: string;
+  /** Nomes/termos a manter na tradução e corrigir na transcrição (maiores primeiro). */
+  names: string[];
+  /** Palavras-chave do assunto declaradas pela página (tags, descrição, título). */
+  keywords: string[];
+  /** Palavras-chave do que está sendo dito (últimas frases transcritas). */
+  spoken: string[];
+  /** Assunto digitado pelo usuário nas opções. */
+  topic: string;
+}
+
+export interface VideoContextInput {
+  tabTitle: string;
+  page?: PageContext | null;
+  /** Usar título/página como fonte (opção useTabContext). */
+  useTabContext: boolean;
+  glossary: string;
+  ignoredTerms: string[];
+  topic?: string;
+  /** Últimas frases transcritas (as mais antigas primeiro). */
+  spokenTexts?: string[];
+}
+
+const MAX_NAMES = 20;
+const MAX_KEYWORDS = 10;
+const MAX_SPOKEN = 8;
+/** Quantas frases recentes entram nas palavras-chave da fala (o assunto acompanha o vídeo). */
+export const SPOKEN_WINDOW = 40;
+
+/** Monta o contexto completo (puro: usado igual no viewer e no offscreen). */
+export function buildVideoContext(input: VideoContextInput): VideoContext {
+  const page = input.page ?? EMPTY_PAGE;
+  const ignored = new Set(input.ignoredTerms.map((t) => t.toLowerCase()));
+  const notIgnored = (t: string) => !ignored.has(t.toLowerCase());
+  const useTab = input.useTabContext;
+  const title = useTab ? cleanTitle(input.tabTitle).join(' - ') : '';
+  const description = useTab ? cleanDescription(page.description) : '';
+  const manual = parseGlossary(input.glossary);
+  const auto = useTab ? [...extractTermsFromTitle(input.tabTitle), ...extractNamesFromText(page.description), ...tagNames(page.tags)] : [];
+  const names = mergeTerms(manual, auto).filter(notIgnored).slice(0, MAX_NAMES + manual.length);
+  const nameWords = new Set([...names, page.channel].flatMap((n) => n.toLowerCase().split(/\s+/)));
+  const pageTexts = useTab ? [...page.tags, cleanDescription(page.description, 600), title] : [];
+  const keywords = extractKeywords(pageTexts, MAX_KEYWORDS * 2)
+    .filter((k) => notIgnored(k) && !nameWords.has(k.toLowerCase()))
+    .slice(0, MAX_KEYWORDS);
+  const spokenTexts = (input.spokenTexts ?? []).slice(-SPOKEN_WINDOW);
+  const spoken = extractKeywords(spokenTexts, MAX_SPOKEN * 2, 2)
+    .filter((k) => notIgnored(k) && !nameWords.has(k.toLowerCase()) && !keywords.some((x) => x.toLowerCase() === k.toLowerCase()))
+    .slice(0, MAX_SPOKEN);
+  return { title, channel: useTab ? page.channel : '', description, names, keywords, spoken, topic: (input.topic ?? '').trim() };
+}
+
+/** Tags que parecem nomes (com maiúscula, não só palavras comuns): "Hugh Laurie", "House MD". */
+function tagNames(tags: string[]): string[] {
+  const out: string[] = [];
+  for (const tag of tags) {
+    const tokens = tokenize(tag).filter(isWord);
+    if (tokens.length === 0 || tokens.length > 4) continue;
+    if (!tokens.every((t) => t.capitalized || isHonorific(t) || CONNECTORS.has(t.text.toLowerCase()))) continue;
+    if (tokens.every((t) => isCommon(t) || isMeta(t) || CONNECTORS.has(t.text.toLowerCase()))) continue;
+    out.push(tag.trim());
+  }
+  return out;
+}
+
+/** Termos para o reconhecimento do Chrome (phrases): nomes e palavras-chave. */
+export function contextPhrases(ctx: VideoContext): string[] {
+  return mergeTerms(ctx.names, ctx.keywords, ctx.spoken, ctx.topic ? [ctx.topic] : []);
+}
+
+/**
+ * Linha de assunto para o prompt do Whisper, em texto corrido (o modelo a lê como a
+ * transcrição anterior): título, canal, descrição resumida e palavras-chave. Os nomes e
+ * as últimas frases são acrescentados pelo motor. Vazio quando não há assunto.
+ */
+export function topicPrompt(ctx: VideoContext, maxChars = 360): string {
+  const parts: string[] = [];
+  if (ctx.topic) parts.push(ensurePeriod(ctx.topic));
+  if (ctx.title) parts.push(ensurePeriod(ctx.channel && !ctx.title.toLowerCase().includes(ctx.channel.toLowerCase()) ? `${ctx.title} (${ctx.channel})` : ctx.title));
+  if (ctx.description) parts.push(ensurePeriod(ctx.description));
+  const kws = [...ctx.keywords, ...ctx.spoken];
+  if (kws.length) parts.push(`${kws.join(', ')}.`);
+  let text = parts.join(' ').replace(/\s+/g, ' ').trim();
+  if (text.length > maxChars) {
+    // Corta a descrição (meio), mantendo título e palavras-chave.
+    const short = { ...ctx, description: '' };
+    text = topicPrompt(short, maxChars);
+    if (text.length < maxChars - 40 && ctx.description) {
+      const room = maxChars - text.length - 1;
+      const desc = cleanDescription(ctx.description, room);
+      if (desc.length > 20) text = topicPrompt({ ...ctx, description: desc }, Infinity);
+    }
+  }
+  return text;
+}
+
+function ensurePeriod(s: string): string {
+  const t = s.trim();
+  return /[.!?…]$/.test(t) ? t : `${t}.`;
+}

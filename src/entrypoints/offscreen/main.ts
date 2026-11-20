@@ -25,7 +25,7 @@ import { Agc, normalizePeak } from '@/lib/audio/agc';
 import { VAD_PROFILES, VAD_SENSITIVITIES, type SpeechSegmenter } from '@/lib/audio/vad';
 import { MusicSegmenter, musicWindowOptions } from '@/lib/audio/music';
 import { cleanLyrics } from '@/lib/stt/lyrics';
-import { extractTermsFromTitle, mergeTerms, parseGlossary } from '@/lib/context';
+import { buildVideoContext, contextPhrases, topicPrompt } from '@/lib/context';
 import { ChromeSpeechProvider } from '@/lib/stt/chrome-speech';
 import { DEFAULT_SERVER_SPEECH, ServerSpeechProvider, type ServerSpeechConfig } from '@/lib/stt/server-speech';
 import { LocalTransformersProvider } from '@/lib/stt/local-transformers';
@@ -91,6 +91,8 @@ function toEvent(r: TranscriptResult): TranscriptEvent {
 }
 
 let musicMode = false;
+/** A sessão refaz o contexto (palavras-chave da fala) quando o histórico de finais muda. */
+let onFinalsChanged: (() => void) | null = null;
 
 function handleResult(r: TranscriptResult): void {
   // Música: tira "♪"/"[Music]" e descarta as frases que o Whisper inventa em trechos instrumentais.
@@ -100,6 +102,7 @@ function handleResult(r: TranscriptResult): void {
     finals.push(ev);
     if (finals.length > HISTORY_LIMIT) finals.shift();
     if (lastPartial?.segmentId === r.segmentId) lastPartial = null;
+    if (ev.text) onFinalsChanged?.();
     console.log(
       `%c[transcrição] %c${r.text || '(vazio)'}`,
       'color:#0a7;font-weight:bold',
@@ -274,21 +277,42 @@ async function startCapture(
   const agc = !musicMode && vs.agcMaxGain > 1 ? new Agc({ sampleRate: TARGET_SAMPLE_RATE, target: 0.5, maxGain: vs.agcMaxGain }) : null;
   worklet.port.onmessage = (e: MessageEvent<Float32Array>) => vad.push(agc ? agc.process(e.data) : e.data);
 
-  // Glossário (título da aba + opções) para o reconhecimento do Chrome. O offscreen não
-  // tem chrome.storage, então o background manda o contexto no início e a cada mudança.
+  // Contexto (título, metadados da página, glossário, assunto digitado e palavras-chave do
+  // que está sendo dito) → nomes e palavras-chave como phrases do Chrome e assunto em texto
+  // corrido para o prompt do Whisper. O offscreen não tem chrome.storage, então o background
+  // manda o contexto no início e a cada mudança; as frases transcritas vêm de `finals`.
   let context: SpeechContext = { ...initialContext };
-  const applyPhrases = () => {
-    if (!provider.setPhrases) return;
-    const auto = context.useTabContext ? extractTermsFromTitle(context.tabTitle) : [];
-    const ignored = context.ignoredTerms ?? [];
-    const terms = mergeTerms(parseGlossary(context.glossary), auto).filter((t) => !ignored.includes(t.toLowerCase()));
-    provider.setPhrases(terms);
-    log(`glossário do reconhecimento: ${terms.join(', ') || '(vazio)'}`);
+  let lastPhrases = '';
+  let lastTopic = '';
+  const applyContext = () => {
+    const ctx = buildVideoContext({
+      tabTitle: context.tabTitle,
+      page: context.page,
+      useTabContext: context.useTabContext,
+      glossary: context.glossary,
+      ignoredTerms: context.ignoredTerms ?? [],
+      topic: context.topic,
+      spokenTexts: finals.map((f) => f.text),
+    });
+    const phrases = contextPhrases(ctx);
+    const key = phrases.join('|');
+    if (key !== lastPhrases) {
+      lastPhrases = key;
+      provider.setPhrases?.(phrases);
+      log(`termos do contexto: ${phrases.join(', ') || '(vazio)'}`);
+    }
+    const topic = topicPrompt(ctx);
+    if (topic !== lastTopic) {
+      lastTopic = topic;
+      provider.setTopic?.(topic);
+      if (topic) log(`assunto: ${topic}`);
+    }
   };
   const setContext = (patch: Partial<SpeechContext>) => {
     context = { ...context, ...patch };
-    applyPhrases();
+    applyContext();
   };
+  onFinalsChanged = applyContext;
 
   // Se a aba parar de compartilhar (fechou, mudou de página), encerra.
   const track = stream.getAudioTracks()[0];
@@ -309,7 +333,10 @@ async function startCapture(
     if (p.consumesStream && track) p.attachTrack?.(track);
     await p.start();
     providerReady = true;
-    applyPhrases();
+    // Provedor novo (ou o de reserva): recebe o contexto inteiro.
+    lastPhrases = '';
+    lastTopic = '';
+    applyContext();
     log(`provedor ${p.name} pronto em ${(performance.now() - t0).toFixed(0)} ms`);
   };
   try {
@@ -342,6 +369,7 @@ async function stopCapture(): Promise<void> {
   if (!session) return;
   const s = session;
   session = null;
+  onFinalsChanged = null;
   log('parando captura');
   window.clearInterval(s.partialTimer);
   s.worklet.port.onmessage = null;
@@ -384,6 +412,7 @@ browser.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
         finals.length = 0;
         lastPartial = null;
         session?.provider.resetContext?.();
+        onFinalsChanged?.();
         log('histórico e contexto limpos pelo viewer');
         return { ok: true };
       case 'stop-capture':

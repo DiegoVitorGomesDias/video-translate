@@ -14,10 +14,13 @@ import {
 } from '@/lib/messages';
 import { DEFAULT_OPTIONS, OPTIONS_KEY, loadOptions, saveOptions, watchOptions, type Options } from '@/lib/options';
 import { chooseCaptureTab } from '@/lib/capture-target';
+import type { PageContext } from '@/lib/context';
 
 const OFFSCREEN_URL = '/offscreen.html';
 const VIEWER_URL = '/viewer.html';
 const DRAWER_SCRIPT = '/content-scripts/drawer.js';
+/** Lê os metadados do vídeo (descrição, canal, tags) na aba capturada; ver page-context.content.ts. */
+const PAGE_CONTEXT_SCRIPT = '/content-scripts/page-context.js';
 const SIDEPANEL_PATH = 'viewer.html?mode=sidepanel';
 
 const EMPTY_STATE: CaptureState = { tabId: null, windowId: null };
@@ -252,21 +255,35 @@ async function switchDisplay(mode: DisplayMode, sidePanelOpened = false): Promis
   await saveOptions({ ...options, displayMode: next.mode ?? mode });
 }
 
-/** Título/URL da aba capturada mudaram (o viewer usa o título como contexto da tradução). */
-async function updateTabTitle(title: string, url: string): Promise<void> {
+/** Título/URL (e, se vieram, os metadados) da aba capturada mudaram: o viewer e o offscreen usam como contexto. */
+async function updateTabTitle(title: string, url: string, page?: PageContext): Promise<void> {
   const state = await getState();
   if (state.tabId === null) return;
-  if (state.tabTitle === title && (!url || state.tabUrl === url)) return;
-  await setState({ ...state, tabTitle: title, tabUrl: url || state.tabUrl });
+  const samePage = !page || JSON.stringify(page) === JSON.stringify(state.page ?? null);
+  if (state.tabTitle === title && (!url || state.tabUrl === url) && samePage) return;
+  await setState({ ...state, tabTitle: title, tabUrl: url || state.tabUrl, page: page ?? state.page });
   if (await hasOffscreenDocument()) {
-    sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'set-context', context: { tabTitle: title } }, 1).catch(() => undefined);
+    sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'set-context', context: { tabTitle: title, ...(page ? { page } : {}) } }, 1).catch(() => undefined);
   }
 }
 
 /**
- * Botão "limpar" do viewer: relê o título da aba capturada. Com activeTab a aba traz o
- * título; sem acesso (navegação depois do clique no ícone) tabs.get devolve sem título e
- * o que o drawer mandou por último fica valendo.
+ * Injeta (ou acorda) o leitor de metadados na aba capturada. Precisa de acesso à aba
+ * (activeTab: clique no ícone nela, válido enquanto ficar na mesma origem); sem acesso
+ * fica o título que o Chrome/drawer mandou.
+ */
+async function readPageContext(tabId: number): Promise<void> {
+  try {
+    await browser.scripting.executeScript({ target: { tabId }, files: [PAGE_CONTEXT_SCRIPT] });
+  } catch (err) {
+    console.warn('[background] sem acesso aos metadados da aba (activeTab?):', err);
+  }
+}
+
+/**
+ * Botão "limpar" do viewer: relê o título e os metadados da aba capturada (novo vídeo).
+ * Com activeTab a aba traz o título; sem acesso (navegação depois do clique no ícone)
+ * tabs.get devolve sem título e o que o drawer/page-context mandou por último fica valendo.
  */
 async function refreshTabTitle(): Promise<void> {
   const state = await getState();
@@ -278,6 +295,7 @@ async function refreshTabTitle(): Promise<void> {
     return;
   }
   if (tab?.title) await updateTabTitle(tab.title, tab.url ?? '');
+  await readPageContext(state.tabId);
 }
 
 /** Onde mostrar o viewer ao começar: abrir conforme as opções, ou usar o viewer que pediu (já aberto). */
@@ -323,10 +341,13 @@ async function startCapture(tab: chrome.tabs.Tab, options: Options, surface: Sta
       vadSensitivity: options.vadSensitivity,
       audioMode: options.audioMode,
       musicWindow: options.musicWindow,
-      context: { tabTitle: tab.title ?? '', useTabContext: options.useTabContext, glossary: options.glossary, ignoredTerms: options.ignoredTerms },
+      context: { tabTitle: tab.title ?? '', useTabContext: options.useTabContext, glossary: options.glossary, ignoredTerms: options.ignoredTerms, topic: options.topic },
       server: { url: options.sttServerUrl.trim(), format: options.sttServerFormat, model: options.sttServerModel.trim(), apiKey: options.sttServerApiKey.trim() },
     });
     console.log(`[background] captura iniciada na aba ${tab.id} (${tab.title ?? ''})`);
+    // Metadados do vídeo (descrição, canal, tags) → contexto do assunto. Depois do streamId,
+    // que também depende do gesto do usuário.
+    void readPageContext(tab.id);
   } catch (err) {
     console.error('[background] falha ao iniciar a captura:', err);
     browser.runtime.sendMessage({ type: 'capture-status', status: 'error', error: String(err) }).catch(() => undefined);
@@ -431,7 +452,7 @@ export default defineBackground(() => {
     void (async () => {
       const state = await getState();
       if (state.tabId === null || !(await hasOffscreenDocument())) return;
-      sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'set-context', context: { useTabContext: o.useTabContext, glossary: o.glossary, ignoredTerms: o.ignoredTerms } }, 1).catch(() => undefined);
+      sendToOffscreen({ target: OFFSCREEN_TARGET, type: 'set-context', context: { useTabContext: o.useTabContext, glossary: o.glossary, ignoredTerms: o.ignoredTerms, topic: o.topic } }, 1).catch(() => undefined);
     })();
   });
   // Clique no ícone. sidePanel.open() exige o gesto do usuário e o gesto se perde em
@@ -512,6 +533,9 @@ export default defineBackground(() => {
         case 'tab-title':
           void updateTabTitle(msg.title, msg.url);
           break;
+        case 'page-context':
+          void updateTabTitle(msg.title, msg.url, msg.page);
+          break;
         case 'refresh-tab-title':
           refreshTabTitle().then(
             () => sendResponse({ ok: true }),
@@ -549,6 +573,8 @@ export default defineBackground(() => {
     // drawer também avisa por mensagem, cobrindo o resto.
     if (info.title !== undefined || info.url !== undefined) await updateTabTitle(tab.title ?? info.title ?? '', tab.url ?? info.url ?? '');
     if (info.status === 'complete' && state.mode === 'drawer') await openDrawer(tabId);
+    // Página nova (recarga ou navegação): relê os metadados do vídeo.
+    if (info.status === 'complete') await readPageContext(tabId);
   });
 
   // Se a aba capturada fechar, limpa tudo.

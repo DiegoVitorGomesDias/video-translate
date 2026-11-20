@@ -129,6 +129,11 @@ export class LocalTransformersProvider implements SpeechProvider {
     this.post({ type: 'set-terms', terms });
   }
 
+  /** Assunto para o prompt do Whisper (Moonshine ignora). */
+  setTopic(topic: string): void {
+    this.post({ type: 'set-topic', topic });
+  }
+
   setMusicMode(on: boolean): void {
     this.music = on;
     this.post({ type: 'set-mode', music: on });

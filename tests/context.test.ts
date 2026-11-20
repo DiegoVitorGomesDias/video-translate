@@ -106,3 +106,100 @@ test('termo composto casa exatamente e ajusta capitalização', () => {
 test('termos curtos só casam exatamente', () => {
   assert.equal(correctTranscript('Bob and Rob.', ['Bob']), 'Bob and Rob.');
 });
+
+// ---- Assunto do vídeo: metadados da página, nomes em prosa, palavras-chave, prompt ----
+
+import { pageContextFromMeta, extractNamesFromText, extractKeywords, cleanDescription, buildVideoContext, topicPrompt, contextPhrases } from '../src/lib/context.ts';
+
+const HOUSE_DESCRIPTION =
+  'Dr. Gregory House is a brilliant but misanthropic doctor who leads a team of diagnosticians at Princeton-Plainsboro Teaching Hospital. In this episode, a kindergarten teacher collapses.';
+
+test('metadados da página: descrição mais longa, canal do DOM, tags de og:video:tag e keywords', () => {
+  const page = pageContextFromMeta({
+    metas: [
+      { key: 'description', content: 'Dr. Gregory House is a brilliant but misanthropic doctor...' },
+      { key: 'og:description', content: HOUSE_DESCRIPTION },
+      { key: 'og:site_name', content: 'YouTube' },
+      { key: 'og:video:tag', content: 'house md' },
+      { key: 'og:video:tag', content: 'Hugh Laurie' },
+      { key: 'keywords', content: 'medical drama, lupus, house md' },
+    ],
+    ldJson: ['{"@type":"VideoObject","description":"short","author":"House M.D. Official"}', 'não é json'],
+    domChannel: 'House M.D.',
+  });
+  assert.equal(page.description, HOUSE_DESCRIPTION);
+  assert.equal(page.channel, 'House M.D.');
+  assert.equal(page.siteName, 'YouTube');
+  assert.deepEqual(page.tags, ['house md', 'Hugh Laurie', 'medical drama', 'lupus']);
+});
+
+test('metadados: autor do JSON-LD (objeto) quando o DOM não tem canal; sem metas dá vazio', () => {
+  const page = pageContextFromMeta({ metas: [], ldJson: ['{"@graph":[{"@type":"Movie","description":"A heist.","author":{"name":"Studio X"},"genre":["Crime","Thriller"]}]}'] });
+  assert.equal(page.description, 'A heist.');
+  assert.equal(page.channel, 'Studio X');
+  assert.deepEqual(page.tags, ['Crime', 'Thriller']);
+  assert.deepEqual(pageContextFromMeta({ metas: [], ldJson: [] }), { description: '', channel: '', siteName: '', tags: [] });
+});
+
+test('nomes em prosa: honorífico no início, sequências no meio, nunca a maiúscula da frase sozinha', () => {
+  assert.deepEqual(extractNamesFromText(HOUSE_DESCRIPTION), ['Dr. Gregory House', 'Gregory House', 'Gregory', 'Princeton-Plainsboro Teaching Hospital', 'Princeton-Plainsboro']);
+  // "Paris" é palavra comum: sozinha no meio da frase não vale; no início da frase só uma sequência de 2+ incomuns.
+  assert.deepEqual(extractNamesFromText('The team visits Paris and Gotham. Hugh Laurie stars as the doctor. Subscribe at https://x.y/z #house'), ['Gotham', 'Hugh Laurie']);
+  assert.deepEqual(extractNamesFromText('Season 2 starts now. I think so. English is hard.'), []);
+});
+
+test('palavras-chave: fora das palavras comuns, por frequência, flexões juntas', () => {
+  const kws = extractKeywords(['The eigenvalues of the matrix tell us the behaviour of the Markov chain.', 'An eigenvector is scaled by its eigenvalue.', 'The matrix is stochastic.'], 5);
+  assert.deepEqual(kws.slice(0, 2).sort(), ['eigenvalue', 'matrix']);
+  assert.ok(kws.includes('Markov') && kws.includes('eigenvector'));
+  // Fala: só repetidas (minCount 2); "patient" é comum mas não está entre as ~800 mais frequentes.
+  const spoken = extractKeywords(['The patient has a fever.', 'Yeah, the patient is okay now, I think.', 'Okay, yeah.'], 5, 2);
+  assert.deepEqual(spoken, ['patient']);
+});
+
+test('descrição limpa: sem links, hashtags, chamadas e marcas de tempo; cortada em frase', () => {
+  const d = cleanDescription('Subscribe to my channel! https://x.y/z\nIn this video we explore the eigenvalues of a matrix and why they matter for Markov chains. 🔥\n0:00 Intro\nHelp fund future projects:\nFollow me @me #math');
+  assert.equal(d, 'In this video we explore the eigenvalues of a matrix and why they matter for Markov chains.');
+  const long = cleanDescription(`${HOUSE_DESCRIPTION} ${HOUSE_DESCRIPTION}`, 160);
+  assert.ok(long.length <= 161 && long.endsWith('.'), long);
+  assert.equal(cleanDescription('Dr. House returns. Short.'), 'Dr. House returns.');
+});
+
+test('contexto completo: nomes do título, descrição e tags; palavras-chave da página e da fala; prompt', () => {
+  const page = { description: HOUSE_DESCRIPTION, channel: 'House M.D.', siteName: 'YouTube', tags: ['house md', 'Hugh Laurie', 'medical drama', 'lupus'] };
+  const spoken = ['The patient has a fever and the MRI shows nothing.', 'Run the blood test again, Cuddy wants results.', 'It is not lupus.', 'The patient is seizing!', 'Lupus would explain the fever.'];
+  const ctx = buildVideoContext({ tabTitle: 'House M.D. - Everybody Lies | Prime Video', page, useTabContext: true, glossary: 'Cuddy', ignoredTerms: ['everybody lies'], spokenTexts: spoken });
+  assert.equal(ctx.title, 'House M.D. - Everybody Lies');
+  assert.equal(ctx.channel, 'House M.D.');
+  for (const n of ['Cuddy', 'House', 'House M.D.', 'Dr. Gregory House', 'Hugh Laurie', 'Princeton-Plainsboro Teaching Hospital']) assert.ok(ctx.names.includes(n), n);
+  assert.ok(!ctx.names.includes('Everybody Lies'), 'ignorado');
+  assert.ok(ctx.keywords.includes('lupus') && ctx.keywords.includes('diagnosticians'), ctx.keywords.join(','));
+  assert.ok(!ctx.keywords.some((k) => k.toLowerCase() === 'gregory'), 'palavra de nome não vira palavra-chave');
+  assert.deepEqual(ctx.spoken, ['fever', 'patient']);
+  const prompt = topicPrompt(ctx);
+  assert.ok(prompt.startsWith('House M.D. - Everybody Lies. Dr. Gregory House is a brilliant'), prompt);
+  assert.ok(prompt.endsWith('fever, patient.'), prompt);
+  assert.ok(prompt.length <= 360, String(prompt.length));
+  const phrases = contextPhrases(ctx);
+  assert.ok(phrases.includes('Cuddy') && phrases.includes('lupus') && phrases.includes('patient'));
+  // Sem contexto da aba: só glossário e assunto digitado.
+  const off = buildVideoContext({ tabTitle: 'House M.D. | Prime Video', page, useTabContext: false, glossary: 'Cuddy', ignoredTerms: [], topic: 'A medical drama.' });
+  assert.deepEqual(off.names, ['Cuddy']);
+  assert.deepEqual(off.keywords, []);
+  assert.equal(topicPrompt(off), 'A medical drama.');
+  assert.equal(topicPrompt(buildVideoContext({ tabTitle: '', useTabContext: true, glossary: '', ignoredTerms: [] })), '');
+});
+
+test('prompt do assunto: canal entra quando não está no título; descrição é cortada antes das palavras-chave', () => {
+  const ctx = buildVideoContext({
+    tabTitle: 'Essence of linear algebra, chapter 14: Eigenvectors and eigenvalues - YouTube',
+    page: { description: 'A visual understanding of eigenvectors, eigenvalues, and the usefulness of an eigenbasis. '.repeat(6), channel: '3Blue1Brown', siteName: 'YouTube', tags: ['linear algebra', 'eigenvectors'] },
+    useTabContext: true,
+    glossary: '',
+    ignoredTerms: [],
+  });
+  const prompt = topicPrompt(ctx, 200);
+  assert.ok(prompt.includes('(3Blue1Brown)'), prompt);
+  assert.ok(prompt.length <= 200, String(prompt.length));
+  assert.ok(/eigenvalues\.$/i.test(prompt) || /Eigenvectors.*\.$/.test(prompt), prompt);
+});

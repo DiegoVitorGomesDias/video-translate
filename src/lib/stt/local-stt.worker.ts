@@ -33,6 +33,8 @@ export type WorkerInMessage =
   | TranscribeRequest
   /** Termos do glossário (nomes, siglas) para o prompt do Whisper. */
   | { type: 'set-terms'; terms: string[] }
+  /** Assunto do vídeo (título, descrição, palavras-chave) em texto corrido para o prompt do Whisper. */
+  | { type: 'set-topic'; topic: string }
   /** Modo música: dica de canto no prompt até haver versos; filtro de eco só contra a janela anterior. */
   | { type: 'set-mode'; music: boolean }
   /** Esquece as últimas frases do prompt (botão "limpar": novo vídeo). */
@@ -56,14 +58,19 @@ let multilingual = false;
 let initTokenIds: number[] = [];
 let prevSotId: number | null = null;
 let terms: string[] = [];
+/** Assunto do vídeo (ver topicPrompt em lib/context.ts): abre o prompt, antes dos nomes e das frases. */
+let topic = '';
 let musicMode = false;
 /** Dica no prompt do Whisper para transcrever canto em vez de devolver "♪" ou texto de legendas. */
 const MUSIC_PROMPT = 'Lyrics:';
 /** Últimas frases finais, usadas como contexto no prompt do Whisper. */
 const recentFinals: string[] = [];
 const RECENT_LIMIT = 3;
-/** Tamanho máximo do prompt em tokens (o Whisper aceita até 224). */
-const PROMPT_MAX_TOKENS = 96;
+/**
+ * Tamanho máximo do prompt em tokens (o Whisper aceita até 224). O corte é pela esquerda:
+ * se não cabe tudo, sai primeiro o assunto, depois os nomes; as últimas frases ficam.
+ */
+const PROMPT_MAX_TOKENS = 160;
 /** Inferência de um final acima disso: os parciais são pulados (o modelo é pesado demais para dois passes). */
 const PARTIAL_SKIP_MS = 1000;
 let lastFinalInferenceMs = 0;
@@ -188,9 +195,10 @@ function setupPrompt(pipe: AutomaticSpeechRecognitionPipeline): void {
   prevSotId = prev;
 }
 
-/** Texto do prompt: glossário + últimas frases (o Whisper o trata como transcrição anterior). */
+/** Texto do prompt: assunto + glossário + últimas frases (o Whisper o trata como transcrição anterior). */
 function promptText(): string {
   const parts: string[] = [];
+  if (topic) parts.push(topic);
   if (terms.length > 0) parts.push(`${terms.slice(0, 30).join(', ')}.`);
   // Música: os versos anteriores são o melhor contexto (o Whisper conhece letras famosas
   // e segue a rima/tema); enquanto não há nenhum, a dica de canto evita "♪" e legendas.
@@ -359,6 +367,9 @@ self.onmessage = (event: MessageEvent<WorkerInMessage>) => {
       break;
     case 'set-terms':
       terms = msg.terms;
+      break;
+    case 'set-topic':
+      topic = msg.topic;
       break;
     case 'set-mode':
       musicMode = msg.music;

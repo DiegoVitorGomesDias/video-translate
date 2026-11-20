@@ -131,6 +131,7 @@ export class ServerSpeechProvider implements SpeechProvider {
   private busy = false;
   private active = false;
   private terms: string[] = [];
+  private topic = '';
   private recent: string[] = [];
   private lastFinalMs = 0;
   private music = false;
@@ -149,6 +150,10 @@ export class ServerSpeechProvider implements SpeechProvider {
 
   setPhrases(terms: string[]): void {
     this.terms = terms;
+  }
+
+  setTopic(topic: string): void {
+    this.topic = topic;
   }
 
   setMusicMode(on: boolean): void {
@@ -205,11 +210,13 @@ export class ServerSpeechProvider implements SpeechProvider {
 
   private prompt(): string {
     const parts: string[] = [];
+    if (this.topic) parts.push(this.topic);
     if (this.terms.length > 0) parts.push(`${this.terms.slice(0, 30).join(', ')}.`);
     // Música: dica de canto até haver versos; depois os versos anteriores (ver local-stt.worker.ts).
     if (this.music && this.recent.length === 0) parts.push('Lyrics:');
     else parts.push(...this.recent);
-    return parts.join(' ').replace(/\s+/g, ' ').trim().slice(-600);
+    // Corte pela esquerda: sai primeiro o assunto, depois os nomes; as últimas frases ficam.
+    return parts.join(' ').replace(/\s+/g, ' ').trim().slice(-900);
   }
 
   private async pump(): Promise<void> {

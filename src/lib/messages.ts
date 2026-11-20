@@ -1,6 +1,8 @@
 // Tipos das mensagens trocadas entre background, offscreen e a janela do viewer.
 // Todas trafegam por browser.runtime.sendMessage; o campo `target` indica quem deve tratar.
 
+import type { PageContext } from './context';
+
 export const OFFSCREEN_TARGET = 'offscreen' as const;
 export const BACKGROUND_TARGET = 'background' as const;
 export const DRAWER_TARGET = 'drawer' as const;
@@ -42,13 +44,17 @@ export interface StartCaptureMessage {
   server?: { url: string; format: 'whispercpp' | 'openai'; model: string; apiKey: string };
 }
 
-/** Fonte do glossário para o reconhecimento do Chrome: título da aba e opções. */
+/** Fonte do contexto dos motores de fala (prompt do Whisper, phrases do Chrome): título, página e opções. */
 export interface SpeechContext {
   tabTitle: string;
   useTabContext: boolean;
   glossary: string;
   /** Termos ignorados pelo usuário (minúsculas), como em Options.ignoredTerms. */
   ignoredTerms: string[];
+  /** Metadados da página do vídeo (descrição, canal, tags), lidos pelo content script page-context. */
+  page?: PageContext;
+  /** Assunto digitado pelo usuário (Options.topic). */
+  topic?: string;
 }
 
 /** Título da aba ou opções mudaram; o offscreen refaz o glossário do reconhecimento do Chrome. */
@@ -124,13 +130,22 @@ export interface TabTitleMessage {
   url: string;
 }
 
-/** Botão "limpar" do viewer: relê o título da aba capturada (novo vídeo) e refaz o contexto. */
+/** Botão "limpar" do viewer: relê o título e os metadados da aba capturada (novo vídeo) e refaz o contexto. */
 export interface RefreshTabTitleMessage {
   target: typeof BACKGROUND_TARGET;
   type: 'refresh-tab-title';
 }
 
-export type BackgroundMessage = StopCaptureRequestMessage | StartCaptureRequestMessage | DrawerClosedMessage | SwitchDisplayMessage | TabTitleMessage | RefreshTabTitleMessage;
+/** O content script page-context leu os metadados da página do vídeo (no início e quando mudam). */
+export interface PageContextMessage {
+  target: typeof BACKGROUND_TARGET;
+  type: 'page-context';
+  title: string;
+  url: string;
+  page: PageContext;
+}
+
+export type BackgroundMessage = StopCaptureRequestMessage | StartCaptureRequestMessage | DrawerClosedMessage | SwitchDisplayMessage | TabTitleMessage | RefreshTabTitleMessage | PageContextMessage;
 
 // ---- Para o content script do drawer (via tabs.sendMessage) ----
 
@@ -203,6 +218,8 @@ export interface CaptureState {
   tabId: number | null;
   tabTitle?: string;
   tabUrl?: string;
+  /** Metadados da página do vídeo (descrição, canal, tags) para o contexto. */
+  page?: PageContext;
   windowId?: number | null;
   /** Como o viewer está sendo mostrado nesta captura (undefined = nenhum viewer aberto). */
   mode?: DisplayMode;
