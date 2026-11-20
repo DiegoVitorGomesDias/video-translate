@@ -1,9 +1,15 @@
-# Publica o PWA (pasta pwa/) no GitHub Pages a cada push na main.
+# Publica o PWA (pasta pwa/) no GitHub Pages a cada push na main e sempre que o workflow
+# "Android APK" termina na main. Junto vai o APK do app Android (copiado do release
+# android-latest para /android/), para haver um link público de download sem login no GitHub.
 # Ative uma vez no repositório: Settings → Pages → Source: "GitHub Actions".
 name: Publicar PWA no GitHub Pages
 
 on:
   push:
+    branches: [main]
+  workflow_run:
+    workflows: ['Android APK']
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -18,6 +24,8 @@ concurrency:
 
 jobs:
   build:
+    # Em workflow_run só publica se o APK foi gerado com sucesso.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +40,31 @@ jobs:
       - run: node scripts/copy-ort.mjs
       - run: pnpm pwa:compile
       - run: pnpm pwa:build
+      - name: Copiar APKs do release android-latest para /android/
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          dir=pwa/dist/android
+          mkdir -p "$dir"
+          # REST em vez de `gh release download` (que usa GraphQL); o GITHUB_TOKEN basta no repo privado.
+          assets=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/android-latest" --jq '.assets[] | "\(.name) \(.id)"' || true)
+          copy() { # copy <asset no release> <nome público>
+            id=$(printf '%s\n' "$assets" | awk -v n="$1" '$1 == n { print $2 }')
+            if [ -n "$id" ] && gh api -H 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "$dir/$2.tmp"; then
+              mv "$dir/$2.tmp" "$dir/$2"
+              echo "ok: $2 ($(du -h "$dir/$2" | cut -f1))"
+            else
+              echo "::warning::asset $1 não encontrado no release android-latest; o link $2 ficará quebrado até o próximo build do APK"
+            fi
+          }
+          copy app-arm64-v8a-debug.apk video-translate-arm64.apk
+          copy app-armeabi-v7a-debug.apk video-translate-armv7.apk
+          copy app-x86_64-debug.apk video-translate-x86_64.apk
+          find "$dir" -name '*.tmp' -delete
+          # Versão do APK (do build.gradle.kts), para a página de download mostrar.
+          v=$(sed -n 's/^val appVersionName = "\(.*\)"/\1/p' android/app/build.gradle.kts)
+          echo "{\"version\":\"$v\",\"updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$dir/version.json"
       - uses: actions/upload-pages-artifact@v3
         with:
           path: pwa/dist

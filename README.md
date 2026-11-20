@@ -158,7 +158,9 @@ Desenvolvimento: `pnpm pwa:dev` (servidor local), `pnpm pwa:build` (gera `pwa/di
 
 Para usar **com fone de ouvido** no celular (Bluetooth ou com fio), há um app Android nativo em `android/` (Kotlin + Jetpack Compose, Android 10+). Ele captura o **áudio que o próprio aparelho está tocando** (AudioPlaybackCapture via MediaProjection), então funciona com o YouTube, com vídeos no Chrome e com qualquer app que não bloqueie a captura, e mostra as legendas num **painel flutuante** por cima do vídeo. Transcrição (sherpa-onnx + Moonshine) e tradução (ML Kit) rodam no aparelho; nada sai do celular.
 
-**Instalar**: baixe `app-debug.apk` no release [android-latest](https://github.com/DiegoVitorGomesDias/video-translate/releases/tag/android-latest) pelo navegador do celular (o repositório é privado: é preciso estar logado no GitHub no celular), abra o arquivo e permita "instalar apps de fontes desconhecidas" para o navegador. O APK é gerado pelo workflow `.github/workflows/android.yml` a cada push que mexa em `android/`.
+**Instalar (link público, sem conta)**: abra **https://diegovitorgomesdias.github.io/video-translate/android/** no navegador do celular e toque em "Baixar o app". Abra o arquivo baixado e permita "instalar apps de fontes desconhecidas" para o navegador. A página também tem o passo a passo e as versões por arquitetura (o botão baixa a arm64, que serve para quase todo aparelho). Nas Opções da extensão há um botão "QR do app Android" que gera o QR desse link.
+
+Como o link é produzido: o workflow `.github/workflows/android.yml` compila um APK de debug por arquitetura (arm64-v8a, armeabi-v7a, x86_64) e um universal a cada push que mexa em `android/`, e os publica no release [android-latest](https://github.com/DiegoVitorGomesDias/video-translate/releases/tag/android-latest) (precisa de login, pois o repositório é privado). Ao terminar, o workflow `pages.yml` roda de novo, baixa esses APKs do release e os copia para `/android/` no GitHub Pages, que é público mesmo com o repositório privado: `video-translate-arm64.apk`, `video-translate-armv7.apk`, `video-translate-x86_64.apk` e um `version.json` com a versão e a data. O APK universal (todas as arquiteturas, ~160 MB) fica só no release.
 
 **Permissões pedidas e por quê**: *Microfone/áudio* (o Android exige RECORD_AUDIO para a captura interna e para o modo microfone), *captura de tela* (o diálogo do sistema "começar a gravar ou transmitir" é como o Android autoriza a captura do áudio interno; o app não grava a tela), *notificações* (o serviço em primeiro plano mostra uma notificação com Parar), *sobrepor a outros apps* (painel flutuante com as legendas).
 
@@ -177,8 +179,8 @@ video-translate/
 │   ├── vite.config.ts, index.html
 │   └── src/ App.tsx, capture.ts (microfone → worklet → VAD → STT), Settings.tsx, settings.ts
 ├── android/                      # app Android nativo (captura do áudio interno + overlay), Kotlin
-├── .github/workflows/pages.yml   # publica pwa/dist no GitHub Pages
-├── .github/workflows/android.yml # compila o APK e publica no release android-latest
+├── .github/workflows/pages.yml   # publica pwa/dist no GitHub Pages, com os APKs em /android/ (pwa/public/android/)
+├── .github/workflows/android.yml # compila os APKs e publica no release android-latest (e dispara pages.yml)
 ├── scripts/selftest-pwa.mjs      # autoteste do PWA com microfone falso
 ├── scripts/copy-ort.mjs          # copia o runtime ONNX para public/onnx
 ├── scripts/selftest-chrome.mjs   # autoteste em Chrome headless (modelo + páginas)

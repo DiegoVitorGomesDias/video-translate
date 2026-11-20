@@ -37,6 +37,10 @@ export default defineConfig({
         // O runtime ONNX (27 MB) e os modelos ficam em cache para funcionar offline.
         maximumFileSizeToCacheInBytes: 40 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,png,wasm,mjs}'],
+        // /android/ é uma página estática à parte (download do APK); o service worker não deve
+        // responder a ela com o index.html do app.
+        navigateFallbackDenylist: [/\/android\//],
+        globIgnores: ['**/android/**'],
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.hostname === 'huggingface.co' || url.hostname.endsWith('.hf.co') || url.hostname.endsWith('huggingface.co'),

@@ -295,6 +295,14 @@ export function App() {
                 ? 'Ouvindo… aproxime o aparelho do som do vídeo. As frases aparecem aqui.'
                 : 'Carregando o modelo de transcrição (só demora na primeira vez).'
               : 'Toque em Iniciar, permita o microfone e deixe o som do vídeo audível. A transcrição e a tradução acontecem no próprio aparelho.'}
+            {!running && (
+              <>
+                <br />
+                <span>
+                  Vai usar fone de ouvido no Android? Instale o <a href="android/">app Android</a>, que ouve o som do próprio celular.
+                </span>
+              </>
+            )}
           </p>
         )}
         {cards.map((c) => (

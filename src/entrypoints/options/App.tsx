@@ -10,6 +10,8 @@ import type { SttModelId } from '@/lib/messages';
 
 /** URL pública do PWA (GitHub Pages). */
 export const PWA_URL = 'https://diegovitorgomesdias.github.io/video-translate/';
+// Página pública de download do APK do app Android (copiado para o GitHub Pages pelo CI).
+export const ANDROID_URL = `${PWA_URL}android/`;
 
 function encodeForUrl(obj: unknown): string {
   const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
@@ -170,8 +172,8 @@ export function App() {
     }
   };
 
-  const makeQr = async (withSettings: boolean) => {
-    let url = PWA_URL;
+  const makeQr = async (withSettings: boolean, base: string = PWA_URL) => {
+    let url = base;
     if (withSettings) {
       const payload = {
         libreUrl: opts.libreUrl.trim(),
@@ -429,8 +431,16 @@ export function App() {
           </a>
           . Abra no Chrome do celular e use "Adicionar à tela inicial".
         </p>
+        <p className="hint">
+          Com <b>fone de ouvido</b> no Android, o microfone não ouve o vídeo: instale o app Android, que captura o som do próprio celular e mostra as legendas num painel flutuante:{' '}
+          <a href={ANDROID_URL} target="_blank" rel="noreferrer">
+            {ANDROID_URL}
+          </a>
+          . O link é público, não precisa de conta.
+        </p>
         <div className="row">
           <button onClick={() => void makeQr(false)}>Mostrar QR do app</button>
+          <button onClick={() => void makeQr(false, ANDROID_URL)}>QR do app Android</button>
           <button onClick={() => void makeQr(true)}>Exportar configurações (QR)</button>
           <label style={{ fontWeight: 400, display: 'flex', gap: 6, alignItems: 'center', margin: 0 }}>
             <input type="checkbox" checked={includeKey} onChange={(e) => setIncludeKey(e.target.checked)} /> incluir chave do LibreTranslate
@@ -442,7 +452,9 @@ export function App() {
             <div className="hint" style={{ flex: 1, wordBreak: 'break-all' }}>
               {qr.withSettings
                 ? 'Leia com a câmera do celular: o app abre e pergunta se quer importar a URL do LibreTranslate, o modelo, o fallback de tradução e a fonte.'
-                : 'Leia com a câmera do celular para abrir o app.'}
+                : qr.url === ANDROID_URL
+                  ? 'Leia com a câmera do celular para abrir a página de download do app Android.'
+                  : 'Leia com a câmera do celular para abrir o app.'}
               <br />
               <a href={qr.url} target="_blank" rel="noreferrer">
                 {qr.url.length > 120 ? `${qr.url.slice(0, 120)}…` : qr.url}

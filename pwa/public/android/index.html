@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#0a7c6a" />
+    <meta name="robots" content="noindex" />
+    <link rel="icon" href="../icons/icon-192.png" />
+    <title>Video Translate para Android</title>
+    <style>
+      :root { color-scheme: light dark; --bg: #f4f5f7; --card: #fff; --fg: #15171b; --muted: #5b6270; --accent: #0a7c6a; --border: #d9dce2; }
+      @media (prefers-color-scheme: dark) { :root { --bg: #15171b; --card: #1e2127; --fg: #e8eaee; --muted: #9aa3b2; --accent: #2bb49c; --border: #2e323a; } }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+      main { max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; }
+      header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+      header img { width: 56px; height: 56px; border-radius: 14px; }
+      h1 { font-size: 22px; margin: 0; }
+      h1 small { display: block; font-size: 13px; font-weight: 400; color: var(--muted); }
+      .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin: 12px 0; }
+      .btn { display: block; text-align: center; background: var(--accent); color: #fff; text-decoration: none; font-weight: 600; font-size: 17px; padding: 14px 16px; border-radius: 12px; }
+      .btn:active { opacity: .85; }
+      .meta { color: var(--muted); font-size: 13px; text-align: center; margin: 8px 0 0; }
+      ol { padding-left: 20px; margin: 8px 0 0; }
+      li { margin: 6px 0; }
+      details { margin-top: 8px; }
+      summary { cursor: pointer; color: var(--accent); }
+      a { color: var(--accent); }
+      .muted { color: var(--muted); font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="../icons/icon-192.png" alt="" />
+        <h1>Video Translate para Android<small>Legendas em português para o que o celular está tocando</small></h1>
+      </header>
+
+      <div class="card">
+        <a class="btn" id="dl" href="video-translate-arm64.apk" download>Baixar o app (APK)</a>
+        <p class="meta" id="meta">Para celulares Android 10 ou mais recente.</p>
+        <details>
+          <summary>Outras arquiteturas</summary>
+          <p class="muted">
+            O botão acima baixa a versão <b>arm64</b>, que serve para praticamente todo celular atual.
+            Se a instalação falhar com "app não compatível", tente a
+            <a href="video-translate-armv7.apk" download>versão armv7</a> (aparelhos antigos) ou a
+            <a href="video-translate-x86_64.apk" download>x86_64</a> (emuladores).
+          </p>
+        </details>
+      </div>
+
+      <div class="card">
+        <b>Como instalar</b>
+        <ol>
+          <li>Toque em <b>Baixar o app</b> e aguarde o download terminar.</li>
+          <li>Abra o arquivo baixado. O Android vai pedir para permitir que o navegador instale "apps desconhecidos": permita e volte.</li>
+          <li>Toque em <b>Instalar</b>. Se aparecer um aviso do Play Protect, escolha "Instalar mesmo assim" (o app não está na Play Store).</li>
+          <li>Abra o Video Translate, toque em <b>Iniciar</b> e autorize a captura. Depois abra o YouTube (ou o Chrome) e dê play: as legendas aparecem num painel flutuante.</li>
+        </ol>
+        <p class="muted">Na primeira vez o app baixa o modelo de voz (~108 MB) e o de tradução (~30 MB). Depois disso tudo funciona sem internet e nada sai do aparelho.</p>
+      </div>
+
+      <div class="card muted">
+        Apps com proteção de conteúdo (Prime Video, Netflix e similares) bloqueiam a captura de áudio e saem mudos; para eles use o
+        <a href="../">app web pelo microfone</a>.
+        Para atualizar, basta baixar e instalar de novo por esta página.
+      </div>
+    </main>
+    <script>
+      // Versão e data do APK publicado (escrito pelo workflow pages.yml).
+      fetch('version.json', { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((v) => {
+          if (!v) return;
+          const d = v.updated ? new Date(v.updated).toLocaleDateString('pt-BR') : '';
+          document.getElementById('meta').textContent = `Versão ${v.version}${d ? ', publicada em ' + d : ''}. Para Android 10 ou mais recente.`;
+        })
+        .catch(() => {});
+    </script>
+  </body>
+</html>

@@ -1,5 +1,7 @@
-# Compila o app Android (android/), roda os testes unitários e publica o APK de debug:
-# como artifact em todo push/PR que toque android/, e no release "android-latest" em push na main.
+# Compila o app Android (android/), roda os testes unitários e publica os APKs de debug
+# (um por arquitetura + universal): como artifact em todo push/PR que toque android/, e no
+# release "android-latest" em push na main. Ao terminar na main, o workflow pages.yml roda de
+# novo e copia os APKs para o GitHub Pages (link público, sem login).
 name: Android APK
 
 on:
@@ -39,7 +41,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: video-translate-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/debug/*.apk
       - name: Relatório de testes (se falhar)
         if: failure()
         uses: actions/upload-artifact@v4
@@ -53,7 +55,9 @@ jobs:
           tag_name: android-latest
           name: Android APK (última versão)
           body: |
-            APK de debug do app Android, gerado automaticamente a partir da `main`.
+            APKs de debug do app Android, gerados automaticamente a partir da `main`.
+            Link público (sem login): https://diegovitorgomesdias.github.io/video-translate/android/
+            `app-arm64-v8a-debug.apk` serve para quase todo celular; `app-universal-debug.apk` tem todas as arquiteturas.
             Instale no celular (permitir "fontes desconhecidas"). Veja o README, seção "Android (APK)".
           prerelease: true
-          files: android/app/build/outputs/apk/debug/app-debug.apk
+          files: android/app/build/outputs/apk/debug/*.apk
