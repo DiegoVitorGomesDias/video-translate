@@ -18,6 +18,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import com.videotranslate.app.audio.Agc
 import com.videotranslate.app.audio.AudioSegment
 import com.videotranslate.app.audio.EnergyVad
 import com.videotranslate.app.audio.SegmentReason
@@ -91,7 +92,7 @@ class CaptureService : Service() {
                 running = true
                 TranscriptRepository.reset()
                 val settings = Settings.load(this)
-                val profileLabel = "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s)"
+                val profileLabel = "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s) · sensibilidade ${settings.vadSensitivity.label.lowercase()}"
                 TranscriptRepository.update { it.copy(capture = CaptureState.STARTING, statusText = "Iniciando…", appliedModel = settings.sttModel.label.substringBefore(" ("), appliedProfile = profileLabel) }
                 if (settings.overlayEnabled && android.provider.Settings.canDrawOverlays(this)) {
                     overlay = OverlayManager(this, settings).also { it.show() }
@@ -127,10 +128,12 @@ class CaptureService : Service() {
             record = rec
 
             // 2. VAD + fila de trechos; a leitura começa já (o modelo carrega em paralelo).
-            val vad = EnergyVad(SAMPLE_RATE, settings.vadProfile.silenceMs, settings.vadProfile.maxSegmentMs)
+            val sens = settings.vadSensitivity
+            val vad = EnergyVad(SAMPLE_RATE, settings.vadProfile.silenceMs, settings.vadProfile.maxSegmentMs, minSpeechMs = sens.minSpeechMs, minThreshold = sens.minThreshold, noiseFactor = sens.noiseFactor)
+            val agc = if (sens.agcMaxGain > 1f) Agc(target = 0.5f, maxGain = sens.agcMaxGain, sampleRate = SAMPLE_RATE) else null
             vad.onSegment = { seg -> closedSegments += seg.id; finals.trySend(seg) }
             vad.onLevel = { rms, _ -> TranscriptRepository.update { it.copy(level = minOf(1f, rms * 8)) } }
-            startReading(rec, vad)
+            startReading(rec, vad, agc)
 
             // 3. Tradutor (ML Kit por padrão; LibreTranslate se configurado e saudável).
             scope.launch { translator = pickTranslator(settings) }
@@ -146,7 +149,7 @@ class CaptureService : Service() {
                 recognizer = SherpaRecognizer(downloader.modelDir(settings.sttModel))
             }
             TranscriptRepository.update { it.copy(capture = CaptureState.LISTENING, statusText = "Ouvindo · ${settings.sttModel.label}", progress = null) }
-            overlay?.setStatus("Ouvindo · ${settings.sttModel.label.substringBefore(" (")} · ${settings.vadProfile.label}")
+            overlay?.setStatus("Ouvindo · ${settings.sttModel.label.substringBefore(" (")} · ${settings.vadProfile.label} · ${settings.vadSensitivity.label}")
 
             // 5. Parciais a cada 1,5 s enquanto há trecho aberto.
             scope.launch {
@@ -175,7 +178,7 @@ class CaptureService : Service() {
 
     private fun handleFinal(seg: AudioSegment) {
         val rec = recognizer ?: return
-        val text = rec.transcribe(seg.audio, seg.sampleRate)
+        val text = rec.transcribe(Agc.normalizePeak(seg.audio), seg.sampleRate)
         val reason = when (seg.reason) { SegmentReason.SILENCE -> EndReason.SILENCE; SegmentReason.MAX_LENGTH -> EndReason.MAX_LENGTH; SegmentReason.FLUSH -> EndReason.FLUSH }
         val sentences = segmenter.push(text, System.currentTimeMillis(), reason)
         TranscriptRepository.update { it.copy(partial = "") }
@@ -189,7 +192,7 @@ class CaptureService : Service() {
 
     private fun handlePartial(segmentId: Int, audio: FloatArray) {
         val rec = recognizer ?: return
-        val text = rec.transcribe(audio)
+        val text = rec.transcribe(Agc.normalizePeak(audio))
         if (segmentId in closedSegments) return
         val pending = segmenter.pending
         TranscriptRepository.update { it.copy(partial = listOf(pending, text).filter { p -> p.isNotBlank() }.joinToString(" ")) }
@@ -259,7 +262,7 @@ class CaptureService : Service() {
         return rec
     }
 
-    private fun startReading(rec: AudioRecord, vad: EnergyVad) {
+    private fun startReading(rec: AudioRecord, vad: EnergyVad, agc: Agc?) {
         reading = true
         rec.startRecording()
         readThread = Thread({
@@ -268,7 +271,7 @@ class CaptureService : Service() {
                 val n = rec.read(buf, 0, buf.size)
                 if (n <= 0) { if (n < 0) { Log.w(TAG, "read=$n"); break }; continue }
                 val f = FloatArray(n) { buf[it] / 32768f }
-                vad.push(f)
+                vad.push(agc?.process(f) ?: f)
             }
         }, "audio-read").also { it.start() }
     }
