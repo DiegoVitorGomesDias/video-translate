@@ -2,6 +2,7 @@ package com.videotranslate.app
 
 import android.content.Context
 import com.videotranslate.app.audio.VadProfile
+import com.videotranslate.app.audio.VadSensitivity
 import com.videotranslate.app.stt.SttModel
 
 enum class AudioSource { INTERNAL, MICROPHONE }
@@ -10,6 +11,7 @@ data class Settings(
     val audioSource: AudioSource = AudioSource.INTERNAL,
     val sttModel: SttModel = SttModel.MOONSHINE_TINY,
     val vadProfile: VadProfile = VadProfile.NORMAL,
+    val vadSensitivity: VadSensitivity = VadSensitivity.NORMAL,
     val fontSp: Int = 18,
     val libreUrl: String = "",
     val libreApiKey: String = "",
@@ -26,6 +28,7 @@ data class Settings(
                 audioSource = runCatching { AudioSource.valueOf(p.getString("audioSource", "INTERNAL")!!) }.getOrDefault(AudioSource.INTERNAL),
                 sttModel = SttModel.byId(p.getString("sttModel", null)),
                 vadProfile = runCatching { VadProfile.valueOf(p.getString("vadProfile", "NORMAL")!!) }.getOrDefault(VadProfile.NORMAL),
+                vadSensitivity = runCatching { VadSensitivity.valueOf(p.getString("vadSensitivity", "NORMAL")!!) }.getOrDefault(VadSensitivity.NORMAL),
                 fontSp = p.getInt("fontSp", 18),
                 libreUrl = p.getString("libreUrl", "") ?: "",
                 libreApiKey = p.getString("libreApiKey", "") ?: "",
@@ -40,6 +43,7 @@ data class Settings(
                 .putString("audioSource", s.audioSource.name)
                 .putString("sttModel", s.sttModel.id)
                 .putString("vadProfile", s.vadProfile.name)
+                .putString("vadSensitivity", s.vadSensitivity.name)
                 .putInt("fontSp", s.fontSp)
                 .putString("libreUrl", s.libreUrl)
                 .putString("libreApiKey", s.libreApiKey)

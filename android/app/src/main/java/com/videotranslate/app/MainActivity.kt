@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.videotranslate.app.audio.VadProfile
+import com.videotranslate.app.audio.VadSensitivity
 import com.videotranslate.app.stt.SttModel
 
 class MainActivity : ComponentActivity() {
@@ -137,8 +138,8 @@ fun MainScreen() {
         }
         run {
             val model = state.appliedModel.ifEmpty { settings.sttModel.label.substringBefore(" (") }
-            val profile = state.appliedProfile.ifEmpty { "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s)" }
-            val changed = running && state.appliedModel.isNotEmpty() && (settings.sttModel.label.substringBefore(" (") != state.appliedModel || !state.appliedProfile.startsWith(settings.vadProfile.label))
+            val profile = state.appliedProfile.ifEmpty { "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s) · sensibilidade ${settings.vadSensitivity.label.lowercase()}" }
+            val changed = running && state.appliedModel.isNotEmpty() && (settings.sttModel.label.substringBefore(" (") != state.appliedModel || !state.appliedProfile.startsWith(settings.vadProfile.label) || !state.appliedProfile.endsWith(settings.vadSensitivity.label.lowercase()))
             Text(
                 "Modelo: $model · Separação: $profile" + if (changed) "  (novas opções valem na próxima captura)" else "",
                 style = MaterialTheme.typography.labelSmall, color = if (changed) Color(0xFFB26A00) else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -208,6 +209,9 @@ fun SettingsDialog(initial: Settings, onDismiss: () -> Unit, onSave: (Settings) 
 
                 Text("Separação de frases", style = MaterialTheme.typography.labelLarge)
                 VadProfile.entries.forEach { p -> RadioRow("${p.label}: pausa ${p.silenceMs} ms, até ${p.maxSegmentMs / 1000} s", s.vadProfile == p) { s = s.copy(vadProfile = p) } }
+
+                Text("Sensibilidade do detector de fala", style = MaterialTheme.typography.labelLarge)
+                VadSensitivity.entries.forEach { v -> RadioRow("${v.label}: ${v.description}", s.vadSensitivity == v) { s = s.copy(vadSensitivity = v) } }
 
                 Text("Tamanho da fonte: ${s.fontSp}", style = MaterialTheme.typography.labelLarge)
                 Slider(value = s.fontSp.toFloat(), onValueChange = { s = s.copy(fontSp = it.toInt()) }, valueRange = 12f..32f)
