@@ -1,5 +1,5 @@
 // Configurações do PWA em localStorage (equivalente ao chrome.storage.local da extensão).
-import type { AudioModeId, SttModelId, VadProfileId } from '@/lib/messages';
+import type { AudioModeId, MusicWindowId, SttModelId, VadProfileId } from '@/lib/messages';
 import { DEFAULT_STT_MODEL, MUSIC_STT_MODELS, STT_MODELS } from '@/lib/stt/models';
 
 export interface Settings {
@@ -11,6 +11,7 @@ export interface Settings {
   audioMode: AudioModeId;
   /** Modelo do modo música (só Whisper). No celular sem GPU o base é o que cabe no tempo. */
   musicModel: SttModelId;
+  musicWindow: MusicWindowId;
   translationFallback: 'local' | 'google' | 'none';
   fontSize: number;
   /** deviceId do microfone; '' = automático (prefere o microfone do próprio aparelho). */
@@ -26,6 +27,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sentenceSplit: 'normal',
   audioMode: 'speech',
   musicModel: 'whisper-base.en',
+  musicWindow: 'long',
   translationFallback: 'local',
   fontSize: 18,
   micDeviceId: '',
@@ -64,6 +66,7 @@ export function sanitize(input: Partial<Settings> | Record<string, unknown>): Se
     sentenceSplit: s.sentenceSplit === 'fast' || s.sentenceSplit === 'long' ? s.sentenceSplit : 'normal',
     audioMode: s.audioMode === 'music' ? 'music' : 'speech',
     musicModel: MUSIC_STT_MODELS.includes(s.musicModel as SttModelId) ? (s.musicModel as SttModelId) : 'whisper-base.en',
+    musicWindow: s.musicWindow === 'short' || s.musicWindow === 'medium' ? s.musicWindow : 'long',
     translationFallback: fallbackOk ? s.translationFallback! : 'local',
     fontSize: Number.isFinite(font) && font >= 12 && font <= 32 ? font : 18,
     micDeviceId: typeof s.micDeviceId === 'string' ? s.micDeviceId : '',

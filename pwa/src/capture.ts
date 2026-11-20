@@ -5,9 +5,9 @@ import workletUrl from '@/lib/audio/pcm-worklet.ts?worker&url';
 import { PCM_WORKLET_NAME, TARGET_SAMPLE_RATE } from '@/lib/audio/constants';
 import { SileroVad, type VadEngine } from '@/lib/audio/silero-vad';
 import { VAD_PROFILES, type SpeechSegmenter, type VadProfile } from '@/lib/audio/vad';
-import { MusicSegmenter } from '@/lib/audio/music';
+import { MusicSegmenter, musicWindowOptions } from '@/lib/audio/music';
 import { cleanLyrics } from '@/lib/stt/lyrics';
-import type { AudioModeId } from '@/lib/messages';
+import type { AudioModeId, MusicWindowId } from '@/lib/messages';
 import { LocalTransformersProvider } from '@/lib/stt/local-transformers';
 import { candidatesFor } from '@/lib/stt/models';
 import type { SpeechProvider, SpeechProviderStatus, TranscriptResult } from '@/lib/stt/SpeechProvider';
@@ -89,7 +89,7 @@ export class MicCapture {
     return this.current;
   }
 
-  async start(model: SttModelId, h: MicCaptureHandlers, preferredMicId = '', profile: VadProfile = 'normal', audioMode: AudioModeId = 'speech'): Promise<void> {
+  async start(model: SttModelId, h: MicCaptureHandlers, preferredMicId = '', profile: VadProfile = 'normal', audioMode: AudioModeId = 'speech', musicWindow: MusicWindowId = 'long'): Promise<void> {
     if (this.running) return;
     this.handlers = h;
     this.preferredId = preferredMicId;
@@ -115,7 +115,7 @@ export class MicCapture {
     const vp = VAD_PROFILES[profile] ?? VAD_PROFILES.normal;
     let vad: SpeechSegmenter & { dispose?(): void };
     if (music) {
-      vad = new MusicSegmenter({ sampleRate: TARGET_SAMPLE_RATE });
+      vad = new MusicSegmenter({ sampleRate: TARGET_SAMPLE_RATE, ...musicWindowOptions(musicWindow) });
       h.onVadEngine?.('energy');
     } else {
       const silero = new SileroVad({ sampleRate: TARGET_SAMPLE_RATE, silenceMs: vp.silenceMs, maxSegmentMs: vp.maxSegmentMs, resolveUrl: resolveAsset });
@@ -132,8 +132,21 @@ export class MicCapture {
     vad.onLevel = (level, isSpeech) => h.onLevel?.(level, isSpeech);
 
     let ready = false;
+    let pending = 0;
+    const baseResult = provider.onResult;
+    provider.onResult = (r) => {
+      if (r.isFinal) pending = Math.max(0, pending - 1);
+      baseResult?.(r);
+    };
     vad.onSegment = (seg) => {
-      if (ready) provider.transcribe(seg);
+      if (!ready) return;
+      // Música: se a fila passa de 2 janelas o modelo não acompanha; pula em vez de atrasar.
+      if (music && pending >= 2) {
+        console.warn(`[capture] modelo atrasado: janela #${seg.id} pulada`);
+        return;
+      }
+      pending++;
+      provider.transcribe(seg);
     };
     let lastPartialAt = 0;
     vad.onSpeechStart = () => {

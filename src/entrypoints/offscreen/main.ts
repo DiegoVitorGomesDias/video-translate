@@ -6,6 +6,7 @@
 import {
   type AppliedConfig,
   type AudioModeId,
+  type MusicWindowId,
   isOffscreenMessage,
   type BroadcastEvent,
   type GetTranscriptsResponse,
@@ -22,7 +23,7 @@ import { PCM_WORKLET_NAME, TARGET_SAMPLE_RATE } from '@/lib/audio/constants';
 import { SileroVad } from '@/lib/audio/silero-vad';
 import { Agc, normalizePeak } from '@/lib/audio/agc';
 import { VAD_PROFILES, VAD_SENSITIVITIES, type SpeechSegmenter } from '@/lib/audio/vad';
-import { MusicSegmenter } from '@/lib/audio/music';
+import { MusicSegmenter, musicWindowOptions } from '@/lib/audio/music';
 import { cleanLyrics } from '@/lib/stt/lyrics';
 import { extractTermsFromTitle, mergeTerms, parseGlossary } from '@/lib/context';
 import { ChromeSpeechProvider } from '@/lib/stt/chrome-speech';
@@ -36,6 +37,8 @@ const PARTIAL_INTERVAL_MS = 1500;
 /** Trecho precisa ter pelo menos isso de áudio para valer um parcial. */
 const PARTIAL_MIN_MS = 1000;
 const HISTORY_LIMIT = 500;
+/** Modo música: janelas na fila do STT acima disso são puladas (modelo não acompanha). */
+const MUSIC_MAX_BACKLOG = 2;
 
 interface CaptureSession {
   stream: MediaStream;
@@ -149,6 +152,7 @@ async function startCapture(
   initialContext: SpeechContext,
   server: ServerSpeechConfig,
   audioMode: AudioModeId,
+  musicWindow: MusicWindowId,
 ): Promise<void> {
   if (session) {
     log('já capturando; parando a sessão anterior');
@@ -158,7 +162,7 @@ async function startCapture(
   log(`iniciando captura da aba ${tabId} (motor ${engine}, modelo ${model}, separação ${profile}, sensibilidade ${sensitivity}, modo ${audioMode})`);
   finals.length = 0;
   lastPartial = null;
-  applied = { sttModel: model, vadProfile: profile, vadSensitivity: sensitivity, audioMode, sttEngine: engine, activeEngine: engine };
+  applied = { sttModel: model, vadProfile: profile, vadSensitivity: sensitivity, audioMode, musicWindow, sttEngine: engine, activeEngine: engine };
 
   // 1. Stream da aba a partir do streamId obtido no background.
   const stream = await navigator.mediaDevices.getUserMedia({
@@ -194,7 +198,7 @@ async function startCapture(
   const vs = VAD_SENSITIVITIES[sensitivity] ?? VAD_SENSITIVITIES.normal;
   let vad: SpeechSegmenter & { dispose?(): void };
   if (musicMode) {
-    vad = new MusicSegmenter({ sampleRate: TARGET_SAMPLE_RATE });
+    vad = new MusicSegmenter({ sampleRate: TARGET_SAMPLE_RATE, ...musicWindowOptions(musicWindow) });
     applied = { ...applied, vadEngine: 'energy' };
   } else {
     const silero = new SileroVad({
@@ -231,6 +235,12 @@ async function startCapture(
   wrapResult(provider);
   vad.onSegment = (seg) => {
     if (provider.consumesStream) return;
+    // Música: o Whisper custa o mesmo por janela; se a fila passa de 2, o modelo não
+    // acompanha e a legenda só atrasaria mais. Pula a janela em vez de acumular.
+    if (musicMode && pendingSegments >= MUSIC_MAX_BACKLOG) {
+      console.warn(`[offscreen] modelo atrasado (${pendingSegments} janelas na fila): janela #${seg.id} de ${seg.durationMs.toFixed(0)} ms pulada`);
+      return;
+    }
     pendingSegments++;
     log(`trecho #${seg.id} fechado (${seg.reason}) ${seg.durationMs.toFixed(0)} ms, fila=${pendingSegments}`);
     // Falas baixas: o trecho vai normalizado para o STT (o AGC já ajudou o VAD a pegá-las).
@@ -362,6 +372,7 @@ browser.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
           m.context ?? { tabTitle: '', useTabContext: true, glossary: '', ignoredTerms: [] },
           { ...DEFAULT_SERVER_SPEECH, ...(m.server ?? {}) },
           m.audioMode ?? 'speech',
+          m.musicWindow ?? 'long',
         );
         return { ok: true };
       case 'set-context':

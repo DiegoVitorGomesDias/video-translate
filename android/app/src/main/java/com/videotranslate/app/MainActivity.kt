@@ -65,7 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.videotranslate.app.audio.MusicSegmenter
+import com.videotranslate.app.audio.MusicWindow
 import com.videotranslate.app.audio.VadProfile
 import com.videotranslate.app.audio.VadSensitivity
 import com.videotranslate.app.stt.SttModel
@@ -145,7 +145,7 @@ fun MainScreen() {
         run {
             val music = settings.audioMode == AudioMode.MUSIC
             val model = state.appliedModel.ifEmpty { settings.activeModel.label.substringBefore(" (") }
-            val wantedProfile = if (music) MusicSegmenter.LABEL else "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s) · sensibilidade ${settings.vadSensitivity.label.lowercase()}"
+            val wantedProfile = if (music) settings.musicWindow.segmenterLabel else "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s) · sensibilidade ${settings.vadSensitivity.label.lowercase()}"
             val profile = state.appliedProfile.ifEmpty { wantedProfile }
             val changed = running && state.appliedModel.isNotEmpty() && (settings.activeModel.label.substringBefore(" (") != state.appliedModel || state.appliedProfile != wantedProfile)
             Text(
@@ -233,13 +233,15 @@ fun SettingsDialog(initial: Settings, onDismiss: () -> Unit, onSave: (Settings) 
 
                 Text("Modo de áudio (vale na próxima captura)", style = MaterialTheme.typography.labelLarge)
                 RadioRow("Fala: filmes, séries, vídeos falados (detector de fala + Moonshine)", s.audioMode == AudioMode.SPEECH) { s = s.copy(audioMode = AudioMode.SPEECH) }
-                RadioRow("Música: letras cantadas em inglês (janelas de ~3,5 s + Whisper)", s.audioMode == AudioMode.MUSIC) { s = s.copy(audioMode = AudioMode.MUSIC) }
+                RadioRow("Música: letras cantadas em inglês (janelas de 4 a 10 s + Whisper)", s.audioMode == AudioMode.MUSIC) { s = s.copy(audioMode = AudioMode.MUSIC) }
 
                 if (s.audioMode == AudioMode.MUSIC) {
                     Text("Modelo do modo música", style = MaterialTheme.typography.labelLarge)
                     SttModel.entries.filter { it.forMusic }.forEach { m -> RadioRow("${m.label} · download ~${m.sizeMb} MB", s.musicModel == m) { s = s.copy(musicModel = m) } }
+                    Text("Tamanho da janela", style = MaterialTheme.typography.labelLarge)
+                    MusicWindow.entries.forEach { w -> RadioRow("${w.label}: ${w.description}", s.musicWindow == w) { s = s.copy(musicWindow = w) } }
                     Text(
-                        "O Whisper entende voz cantada sobre instrumentos; o Moonshine não. Sem detector de fala: cada janela de ~3,5 s vira um verso, cortada no ponto mais silencioso. Sem texto parcial; a legenda chega alguns segundos depois do verso. Trechos só instrumentais são descartados.",
+                        "O Whisper entende voz cantada sobre instrumentos; o Moonshine não. Ele processa 30 s por chamada, então o custo é por janela: janelas curtas chamam o modelo mais vezes e o base no tablet leva uns 3 a 5 s por chamada. Sem detector de fala: a janela é cortada no ponto mais silencioso e vira um ou mais versos; os versos anteriores entram como contexto. Se o modelo não acompanhar, janelas são puladas em vez de acumular atraso. Sem texto parcial. Trechos só instrumentais são descartados.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 } else {
