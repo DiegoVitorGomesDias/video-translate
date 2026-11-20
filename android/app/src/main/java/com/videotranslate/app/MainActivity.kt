@@ -2,6 +2,8 @@ package com.videotranslate.app
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
@@ -87,6 +89,8 @@ fun MainScreen() {
     val state by TranscriptRepository.state.collectAsStateWithLifecycle()
     var settings by remember { mutableStateOf(Settings.load(context)) }
     var showSettings by remember { mutableStateOf(false) }
+    // Relatório de falha da sessão anterior (exceção gravada ou captura que morreu sem aviso).
+    var crashReport by remember { mutableStateOf(CrashLog.pendingReport(context, CaptureService.running)) }
     var pendingStart by remember { mutableStateOf(false) }
     val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "" }
 
@@ -190,6 +194,25 @@ fun MainScreen() {
     if (showSettings) SettingsDialog(settings, onDismiss = { showSettings = false }) { s ->
         settings = s; Settings.save(context, s); showSettings = false
     }
+    crashReport?.let { report ->
+        AlertDialog(
+            onDismissRequest = { CrashLog.clear(context); crashReport = null },
+            title = { Text("O app fechou na última vez") },
+            text = {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    Text("Detalhes para ajudar a corrigir (copie e cole na conversa):", style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(8.dp))
+                    Text(report, style = MaterialTheme.typography.bodySmall, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Video Translate", report))
+                }) { Text("Copiar") }
+            },
+            dismissButton = { TextButton(onClick = { CrashLog.clear(context); crashReport = null }) { Text("Fechar") } },
+        )
+    }
     activity.hashCode() // mantém a referência (evita warning de variável não usada)
 }
 
@@ -241,7 +264,7 @@ fun SettingsDialog(initial: Settings, onDismiss: () -> Unit, onSave: (Settings) 
                 Row(verticalAlignment = Alignment.CenterVertically) { Switch(s.overlayEnabled, { s = s.copy(overlayEnabled = it) }); Spacer(Modifier.width(8.dp)); Text("Mostrar sobre outros apps") }
                 Text("Opacidade: ${(s.overlayOpacity * 100).toInt()}%"); Slider(s.overlayOpacity, { s = s.copy(overlayOpacity = it) }, valueRange = 0.3f..1f)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Frases no painel: "); listOf(1, 2, 3).forEach { n -> RadioButton(s.overlayLines == n, { s = s.copy(overlayLines = n) }); Text("$n ") }
+                    Text("Frases no painel: "); listOf(1, 2, 3, 4, 5).forEach { n -> RadioButton(s.overlayLines == n, { s = s.copy(overlayLines = n) }); Text("$n ") }
                 }
             }
         },

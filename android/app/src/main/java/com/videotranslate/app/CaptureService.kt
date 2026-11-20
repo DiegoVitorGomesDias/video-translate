@@ -35,15 +35,18 @@ import com.videotranslate.app.translate.CachedTranslationProvider
 import com.videotranslate.app.translate.LibreTranslateProvider
 import com.videotranslate.app.translate.MlKitTranslator
 import com.videotranslate.app.translate.TranslationProvider
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Serviço em primeiro plano: captura o áudio (interno via MediaProjection, ou microfone),
@@ -62,6 +65,10 @@ class CaptureService : Service() {
         private const val SAMPLE_RATE = 16000
         private const val TAG = "CaptureService"
         private const val PARTIAL_INTERVAL_MS = 1500L
+        private const val HEARTBEAT_MS = 10_000L
+        /** Trechos finais à espera do STT. Se o reconhecedor não acompanha o áudio, os mais antigos caem
+         *  (antes a fila era ilimitada e crescia até faltar memória). */
+        private const val FINALS_BACKLOG = 12
 
         @Volatile var running = false
             private set
@@ -71,7 +78,10 @@ class CaptureService : Service() {
         }
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** Erro em qualquer coroutine vira estado de erro visível (e registro em CrashLog) em vez de derrubar o app. */
+    private val onError = CoroutineExceptionHandler { _, e -> reportError("Erro na pipeline de captura", e) }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + onError)
+    private val startedAt = System.currentTimeMillis()
     private var projection: MediaProjection? = null
     private var record: AudioRecord? = null
     private var readThread: Thread? = null
@@ -81,9 +91,12 @@ class CaptureService : Service() {
     private var translator: TranslationProvider? = null
     private var overlay: OverlayManager? = null
     private val segmenter = SentenceSegmenter()
-    private val finals = Channel<AudioSegment>(Channel.UNLIMITED)
+    private val finalsPending = AtomicInteger(0)
+    private val finals = Channel<AudioSegment>(FINALS_BACKLOG, BufferOverflow.DROP_OLDEST) { finalsPending.decrementAndGet(); Log.w(TAG, "STT atrasado: trecho ${it.id} descartado") }
     private val partials = Channel<Pair<Int, FloatArray>>(Channel.CONFLATED)
-    private val closedSegments = HashSet<Int>()
+    /** Maior id de trecho já fechado (os ids crescem em ordem); parcial de id menor ou igual é descartada. */
+    private val lastClosedId = AtomicInteger(0)
+    @Volatile private var lastPartialCostMs = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -141,7 +154,7 @@ class CaptureService : Service() {
             val vad: AudioSegmenter = if (musicMode) MusicSegmenter(SAMPLE_RATE)
             else EnergyVad(SAMPLE_RATE, settings.vadProfile.silenceMs, settings.vadProfile.maxSegmentMs, minSpeechMs = sens.minSpeechMs, minThreshold = sens.minThreshold, noiseFactor = sens.noiseFactor)
             val agc = if (!musicMode && sens.agcMaxGain > 1f) Agc(target = 0.5f, maxGain = sens.agcMaxGain, sampleRate = SAMPLE_RATE) else null
-            vad.onSegment = { seg -> closedSegments += seg.id; finals.trySend(seg) }
+            vad.onSegment = { seg -> lastClosedId.accumulateAndGet(seg.id) { a, b -> maxOf(a, b) }; finalsPending.incrementAndGet(); finals.trySend(seg) }
             vad.onLevel = { rms, _ -> TranscriptRepository.update { it.copy(level = minOf(1f, rms * 8)) } }
             startReading(rec, vad, agc)
 
@@ -168,10 +181,20 @@ class CaptureService : Service() {
 
             // 5. Parciais a cada 1,5 s enquanto há trecho aberto (não no modo música: o Whisper
             //    custa o mesmo para um parcial e para o final, e a janela já é longa).
+            //    Se a última parcial custou mais que o intervalo, o aparelho não acompanha: pula
+            //    parciais para não atrasar os finais.
             if (!musicMode) scope.launch {
                 while (isActive) {
                     delay(PARTIAL_INTERVAL_MS)
-                    if (vad.isSpeaking && vad.currentDurationMs >= 1000) vad.peek()?.let { partials.trySend(vad.currentSegmentId to it) }
+                    if (lastPartialCostMs > PARTIAL_INTERVAL_MS) { lastPartialCostMs = lastPartialCostMs * 2 / 3; continue }
+                    if (vad.isSpeaking && vad.currentDurationMs >= 1000) vad.peekWithId()?.let { partials.trySend(it) }
+                }
+            }
+            // Batimento: estado e memória em arquivo, para diagnosticar se o processo morrer sem exceção.
+            scope.launch {
+                while (isActive) {
+                    CrashLog.heartbeat(this@CaptureService, System.currentTimeMillis() - startedAt, "${TranscriptRepository.state.value.statusText} · ${TranscriptRepository.state.value.cards.size} frases · fila ${finalsPending.get()}")
+                    delay(HEARTBEAT_MS)
                 }
             }
             // 6. Consumidor: finais têm prioridade sobre parciais.
@@ -180,19 +203,26 @@ class CaptureService : Service() {
                 if (seg != null) { handleFinal(seg); continue }
                 val partial = partials.tryReceive().getOrNull()
                 if (partial != null) {
-                    if (partial.first !in closedSegments) handlePartial(partial.first, partial.second)
+                    if (partial.first > lastClosedId.get()) handlePartial(partial.first, partial.second)
                     continue
                 }
                 delay(50)
             }
         } catch (e: Throwable) {
-            Log.e(TAG, "falha na captura", e)
-            TranscriptRepository.update { it.copy(capture = CaptureState.ERROR, statusText = "Erro", error = e.message ?: e.toString()) }
-            overlay?.setStatus("Erro: ${e.message}")
+            reportError("Falha na captura", e)
         }
     }
 
+    private fun reportError(title: String, e: Throwable) {
+        if (e is kotlinx.coroutines.CancellationException) return
+        Log.e(TAG, title, e)
+        CrashLog.record(this, title, e)
+        TranscriptRepository.update { it.copy(capture = CaptureState.ERROR, statusText = "Erro", error = "$title: ${e.message ?: e.toString()}") }
+        overlay?.setStatus("Erro: ${e.message ?: e.javaClass.simpleName}")
+    }
+
     private fun handleFinal(seg: AudioSegment) {
+        finalsPending.decrementAndGet()
         val rec = recognizer ?: return
         var text = rec.transcribe(Agc.normalizePeak(seg.audio), seg.sampleRate)
         if (musicMode) text = LyricsFilter.clean(text)
@@ -209,8 +239,10 @@ class CaptureService : Service() {
 
     private fun handlePartial(segmentId: Int, audio: FloatArray) {
         val rec = recognizer ?: return
+        val t0 = System.currentTimeMillis()
         val text = rec.transcribe(Agc.normalizePeak(audio))
-        if (segmentId in closedSegments) return
+        lastPartialCostMs = System.currentTimeMillis() - t0
+        if (segmentId <= lastClosedId.get()) return
         val pending = segmenter.pending
         TranscriptRepository.update { it.copy(partial = listOf(pending, text).filter { p -> p.isNotBlank() }.joinToString(" ")) }
     }
@@ -283,12 +315,19 @@ class CaptureService : Service() {
         reading = true
         rec.startRecording()
         readThread = Thread({
-            val buf = ShortArray(1024)
-            while (reading) {
-                val n = rec.read(buf, 0, buf.size)
-                if (n <= 0) { if (n < 0) { Log.w(TAG, "read=$n"); break }; continue }
-                val f = FloatArray(n) { buf[it] / 32768f }
-                vad.push(agc?.process(f) ?: f)
+            try {
+                val buf = ShortArray(1024)
+                while (reading) {
+                    val n = rec.read(buf, 0, buf.size)
+                    if (n <= 0) {
+                        if (n < 0) { reportError("Leitura do áudio parou", IllegalStateException("AudioRecord.read devolveu $n")); break }
+                        continue
+                    }
+                    val f = FloatArray(n) { buf[it] / 32768f }
+                    vad.push(agc?.process(f) ?: f)
+                }
+            } catch (e: Throwable) {
+                if (reading) reportError("Erro na thread de áudio", e)
             }
         }, "audio-read").also { it.start() }
     }
@@ -301,9 +340,12 @@ class CaptureService : Service() {
         record?.release(); record = null
         projection?.stop(); projection = null
         scope.cancel()
-        recognizer?.close(); recognizer = null
-        translator?.close(); translator = null
+        // close() espera um transcribe em curso terminar (sincronizado): fora da thread principal.
+        val rec = recognizer; recognizer = null
+        val tr = translator; translator = null
+        Thread({ runCatching { rec?.close() }; runCatching { tr?.close() } }, "capture-close").start()
         overlay?.hide(); overlay = null
+        CrashLog.sessionEnded(this)
         TranscriptRepository.update { it.copy(capture = CaptureState.IDLE, statusText = "Parado", partial = "", level = 0f, progress = null) }
         super.onDestroy()
     }
