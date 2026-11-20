@@ -213,6 +213,9 @@ export interface CaptureState {
 
 export const CAPTURE_STATE_KEY = 'captureState';
 
+/** Começo da mensagem de erro quando a aba a capturar ainda não deu acesso à extensão (activeTab). O viewer a reconhece para oferecer a permissão de host. */
+export const TAB_ACCESS_ERROR = 'esta aba ainda não deu acesso à extensão';
+
 // ---- Guards ----
 
 export function isOffscreenMessage(msg: unknown): msg is OffscreenMessage {
