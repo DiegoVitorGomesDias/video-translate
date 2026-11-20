@@ -3,6 +3,7 @@ import {
   type AppliedConfig,
   BACKGROUND_TARGET,
   CAPTURE_STATE_KEY,
+  TAB_ACCESS_ERROR,
   OFFSCREEN_TARGET,
   isBroadcastEvent,
   type BroadcastEvent,
@@ -305,6 +306,24 @@ export function App() {
       }
     })();
   };
+  /**
+   * A aba nunca recebeu o clique no ícone (sem activeTab): em vez de ir até ela clicar, o
+   * usuário pode dar permissão de host para todos os sites (optional_host_permissions), e
+   * daí Iniciar funciona em qualquer aba. permissions.request exige o gesto deste clique.
+   */
+  const [grantingAccess, setGrantingAccess] = useState(false);
+  const grantAllSites = () => {
+    setGrantingAccess(true);
+    void browser.permissions
+      .request({ origins: ['http://*/*', 'https://*/*'] })
+      .then((granted) => {
+        if (granted) start();
+        else setCaptureError('permissão negada. Clique no ícone da extensão na aba do vídeo para iniciar.');
+      })
+      .catch((err) => setCaptureError(String(err)))
+      .finally(() => setGrantingAccess(false));
+  };
+  const needsTabAccess = captureStatus === 'error' && (captureError ?? '').includes(TAB_ACCESS_ERROR);
   /**
    * Botão "limpar": começou outro vídeo na mesma aba. Apaga as legendas e o resto do
    * segmentador, manda o offscreen esquecer o histórico e as frases anteriores (prompt do
@@ -622,6 +641,19 @@ export function App() {
       </header>
 
       <div className="list" ref={listRef} onScroll={onScroll}>
+        {captureStatus === 'error' && captureError && (
+          <p className="notice error">
+            Não foi possível iniciar: {captureError}
+            {needsTabAccess && (
+              <>
+                {' '}
+                <button className="link" onClick={grantAllSites} disabled={grantingAccess} title="Permissão de host para http/https: a extensão passa a poder capturar qualquer aba sem o clique no ícone">
+                  Permitir todos os sites
+                </button>
+              </>
+            )}
+          </p>
+        )}
         {translator && translator.kind !== 'chrome' && translator.kind !== 'libretranslate' && translator.chromeAvailability === 'downloadable' && chromeDownload === null && (
           <p className="notice warn">
             O Chrome pode traduzir localmente depois de baixar o pacote inglês → português.{' '}
@@ -641,7 +673,7 @@ export function App() {
           </p>
         )}
 
-        {cards.length === 0 && !pendingLine && (
+        {cards.length === 0 && !pendingLine && captureStatus !== 'error' && (
           <p className="empty">
             {captureStatus === 'stopped'
               ? 'Captura encerrada.'

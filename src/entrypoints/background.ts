@@ -8,6 +8,7 @@ import {
   OFFSCREEN_TARGET,
   isBackgroundMessage,
   isBroadcastEvent,
+  TAB_ACCESS_ERROR,
   type CaptureState,
   type DisplayMode,
   type OffscreenMessage,
@@ -438,7 +439,7 @@ async function startFromViewer(msg: { tabId?: number; from: { mode: DisplayMode;
     else await startCapture(tab, options, surface);
   } catch (err) {
     // activeTab vale só para a aba em que o ícone foi clicado (e até ela navegar).
-    if (String(err).includes('not been invoked')) throw new Error(`esta aba ainda não deu acesso à extensão: clique no ícone da extensão nela para iniciar`);
+    if (String(err).includes('not been invoked')) throw new Error(`${TAB_ACCESS_ERROR}: clique no ícone da extensão nela, ou permita todos os sites abaixo`);
     throw err;
   }
 }
