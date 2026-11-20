@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { listMicrophones, type MicDevice } from './capture';
 import { MUSIC_STT_MODELS, STT_MODELS } from '@/lib/stt/models';
 import { VAD_PROFILES, type VadProfile } from '@/lib/audio/vad';
-import { AUDIO_MODES, MUSIC_WINDOW, type AudioMode } from '@/lib/audio/music';
+import { AUDIO_MODES, MUSIC_WINDOWS, type AudioMode, type MusicWindowId } from '@/lib/audio/music';
 import { LOCAL_MT_DOWNLOAD_MB, LibreTranslateProvider } from '@/lib/translate';
 import type { Settings } from './settings';
 import type { SttModelId } from '@/lib/messages';
@@ -69,9 +69,16 @@ export function SettingsPanel({ value, onSave, onClose }: { value: Settings; onS
               </option>
             ))}
           </select>
+          <select id="musicWindow" value={s.musicWindow} onChange={(e) => update('musicWindow', e.target.value as MusicWindowId)} aria-label="Tamanho da janela">
+            {(Object.keys(MUSIC_WINDOWS) as MusicWindowId[]).map((id) => (
+              <option key={id} value={id}>
+                Janela {MUSIC_WINDOWS[id].label.toLowerCase()}{id === 'long' ? ' (padrão)' : ''}
+              </option>
+            ))}
+          </select>
           <p className="hint">
-            Letras cantadas: sem detector de fala, janelas de ~{MUSIC_WINDOW.windowMs / 1000} s transcritas por um Whisper (o Moonshine não entende canto). Sem GPU o base já demora vários segundos por
-            janela; o small pode não acompanhar. Sem texto parcial. Para fone de ouvido, use o app Android.
+            Letras cantadas: sem detector de fala, o áudio é cortado em janelas transcritas por um Whisper (o Moonshine não entende canto). {MUSIC_WINDOWS[s.musicWindow]?.description} Sem GPU o base já
+            demora vários segundos por chamada; o small pode não acompanhar. Sem texto parcial. Para fone de ouvido, use o app Android.
           </p>
         </>
       )}

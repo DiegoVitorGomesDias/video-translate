@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { DEFAULT_OPTIONS, loadOptions, originPattern, saveOptions, type Options } from '@/lib/options';
 import { MUSIC_STT_MODELS, STT_MODELS } from '@/lib/stt/models';
-import { AUDIO_MODES, MUSIC_WINDOW, type AudioMode } from '@/lib/audio/music';
+import { AUDIO_MODES, MUSIC_WINDOWS, type AudioMode, type MusicWindowId } from '@/lib/audio/music';
 import { chromeSpeechAvailability, chromeSpeechInstall, type ChromeSpeechAvailability } from '@/lib/stt/chrome-speech';
 import { serverSpeechPing, serverSpeechProbe } from '@/lib/stt/server-speech';
 import { VAD_PROFILES, VAD_SENSITIVITIES, type VadProfile, type VadSensitivity } from '@/lib/audio/vad';
@@ -184,6 +184,7 @@ export function App() {
         vadSensitivity: opts.vadSensitivity,
         audioMode: opts.audioMode,
         musicModel: opts.musicModel,
+        musicWindow: opts.musicWindow,
         translationFallback: opts.translationFallback,
         fontSize: opts.fontSize,
         glossary: opts.glossary.trim(),
@@ -376,9 +377,21 @@ export function App() {
               ))}
             </select>
             <p className="hint">
-              Só modelos Whisper: foram treinados também com canto, e o Moonshine só com fala. Janelas de ~{MUSIC_WINDOW.windowMs / 1000} s (até {MUSIC_WINDOW.maxWindowMs / 1000} s), cortadas no ponto mais
-              silencioso; cada janela vira um verso. A legenda chega alguns segundos depois do verso e não há texto parcial. O small é o equilíbrio na GPU; o base é mais rápido e erra mais; o turbo é o
-              melhor com música, mas lento sem shader-f16. Com o motor "Servidor local (Docker)" o modelo é o do servidor. A separação de frases e a sensibilidade abaixo não se aplicam neste modo.
+              Só modelos Whisper: foram treinados também com canto, e o Moonshine só com fala. O small é o equilíbrio na GPU; o base é mais rápido e erra mais; o turbo é o melhor com música, mas lento sem
+              shader-f16. Com o motor "Servidor local (Docker)" o modelo é o do servidor. Os versos anteriores entram como contexto no prompt. Não há texto parcial. A separação de frases e a
+              sensibilidade abaixo não se aplicam neste modo.
+            </p>
+            <label htmlFor="musicWindow">Tamanho da janela</label>
+            <select id="musicWindow" value={opts.musicWindow} onChange={(e) => update('musicWindow', e.target.value as MusicWindowId)}>
+              {(Object.keys(MUSIC_WINDOWS) as MusicWindowId[]).map((id) => (
+                <option key={id} value={id}>
+                  {MUSIC_WINDOWS[id].label}{id === 'long' ? ' (padrão)' : ''}
+                </option>
+              ))}
+            </select>
+            <p className="hint">
+              {MUSIC_WINDOWS[opts.musicWindow]?.description} O Whisper processa 30 s por chamada, então o custo é por janela, não por segundo: a janela é cortada no ponto mais silencioso perto do
+              fim e cada janela vira um ou mais versos. Se o modelo não acompanhar, janelas são puladas em vez de acumular atraso.
             </p>
           </div>
         )}

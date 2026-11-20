@@ -1,6 +1,6 @@
 // Configurações do usuário, guardadas em chrome.storage.local.
 
-import type { AudioModeId, DisplayMode, ReadingDirection, SttEngineId, SttModelId, VadProfileId, VadSensitivityId } from './messages';
+import type { AudioModeId, DisplayMode, MusicWindowId, ReadingDirection, SttEngineId, SttModelId, VadProfileId, VadSensitivityId } from './messages';
 import { DEFAULT_MUSIC_STT_MODEL, DEFAULT_STT_MODEL } from './stt/models';
 
 export interface Options {
@@ -23,6 +23,8 @@ export interface Options {
   audioMode: AudioModeId;
   /** Modelo local usado no modo música (só Whisper; ver MUSIC_STT_MODELS). */
   musicModel: SttModelId;
+  /** Tamanho da janela do modo música (ver MUSIC_WINDOWS). */
+  musicWindow: MusicWindowId;
   /** Último recurso quando LibreTranslate e Chrome falham. */
   translationFallback: 'local' | 'google' | 'none';
   /** Tamanho da fonte das legendas, em px. */
@@ -52,6 +54,7 @@ export const DEFAULT_OPTIONS: Options = {
   vadSensitivity: 'normal',
   audioMode: 'speech',
   musicModel: DEFAULT_MUSIC_STT_MODEL,
+  musicWindow: 'long',
   translationFallback: 'local',
   fontSize: 18,
   displayMode: 'sidepanel',

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MusicSegmenter } from '../src/lib/audio/music.ts';
+import { MUSIC_WINDOWS, MusicSegmenter } from '../src/lib/audio/music.ts';
 import type { AudioSegment } from '../src/lib/audio/vad.ts';
 import { cleanLyrics, isMusicHallucination } from '../src/lib/stt/lyrics.ts';
 
@@ -20,36 +20,47 @@ function feed(m: MusicSegmenter, ms: number, amplitude: number): void {
   }
 }
 
-test('MusicSegmenter corta a cada ~3,5 s mesmo sem pausa (instrumental contínuo)', () => {
+const SHORT = { windowMs: MUSIC_WINDOWS.short.windowMs, maxWindowMs: MUSIC_WINDOWS.short.maxWindowMs, searchMs: MUSIC_WINDOWS.short.searchMs };
+
+test('MusicSegmenter (padrão, janela longa) corta a cada ~10 s sem pausa', () => {
   const m = new MusicSegmenter({ sampleRate: SR });
   const out: AudioSegment[] = [];
   m.onSegment = (s) => out.push(s);
+  feed(m, 40000, 0.3);
+  assert.ok(out.length >= 3 && out.length <= 4, `janelas: ${out.length}`);
+  for (const s of out) assert.ok(s.durationMs >= 9000 && s.durationMs <= 12100, `duração ${s.durationMs}`);
+});
+
+test('MusicSegmenter corta a cada ~4 s (janela curta) mesmo sem pausa (instrumental contínuo)', () => {
+  const m = new MusicSegmenter({ sampleRate: SR, ...SHORT });
+  const out: AudioSegment[] = [];
+  m.onSegment = (s) => out.push(s);
   feed(m, 20000, 0.3);
-  // Janela alvo 3,5 s, máxima 5 s: em 20 s saem pelo menos 4 janelas.
-  assert.ok(out.length >= 4, `janelas: ${out.length}`);
+  // Janela alvo 4 s, máxima 5,5 s: em 20 s saem pelo menos 3 janelas.
+  assert.ok(out.length >= 3, `janelas: ${out.length}`);
   for (const s of out) {
-    assert.ok(s.durationMs >= 3000 && s.durationMs <= 5100, `duração ${s.durationMs}`);
+    assert.ok(s.durationMs >= 3500 && s.durationMs <= 5600, `duração ${s.durationMs}`);
     assert.equal(s.reason, 'silence'); // cada janela é um verso fechado para o segmentador
   }
   assert.equal(m.isSpeaking, true); // o resto continua aberto
 });
 
 test('MusicSegmenter corta no ponto mais silencioso perto do fim da janela', () => {
-  const m = new MusicSegmenter({ sampleRate: SR });
+  const m = new MusicSegmenter({ sampleRate: SR, ...SHORT });
   const out: AudioSegment[] = [];
   m.onSegment = (s) => out.push(s);
-  feed(m, 2500, 0.3); // verso
-  feed(m, 200, 0.001); // respiração (quase silêncio) aos 2,5 s
+  feed(m, 2800, 0.3); // verso
+  feed(m, 200, 0.001); // respiração (quase silêncio) aos 2,8 s
   feed(m, 1500, 0.3); // próximo verso
   assert.equal(out.length, 1);
-  // Cortou na respiração (~2,5 a 2,7 s), não aos 3,5 s.
-  assert.ok(out[0]!.durationMs >= 2400 && out[0]!.durationMs <= 2800, `duração ${out[0]!.durationMs}`);
+  // Cortou na respiração (~2,8 a 3,0 s), não aos 4 s.
+  assert.ok(out[0]!.durationMs >= 2700 && out[0]!.durationMs <= 3100, `duração ${out[0]!.durationMs}`);
   // O resto (~1,5 s) ficou como começo da janela seguinte.
   assert.ok(m.currentDurationMs >= 1400 && m.currentDurationMs <= 1800, `resto ${m.currentDurationMs}`);
 });
 
 test('MusicSegmenter fecha na pausa longa e descarta janela só de silêncio', () => {
-  const m = new MusicSegmenter({ sampleRate: SR });
+  const m = new MusicSegmenter({ sampleRate: SR, ...SHORT });
   const out: AudioSegment[] = [];
   const starts: number[] = [];
   m.onSegment = (s) => out.push(s);
@@ -60,7 +71,7 @@ test('MusicSegmenter fecha na pausa longa e descarta janela só de silêncio', (
   feed(m, 1500, 0); // fim da música
   assert.equal(out.length, 1);
   assert.equal(out[0]!.reason, 'silence');
-  assert.ok(out[0]!.durationMs >= 2700 && out[0]!.durationMs <= 3000, `duração ${out[0]!.durationMs}`);
+  assert.ok(out[0]!.durationMs >= 2900 && out[0]!.durationMs <= 3200, `duração ${out[0]!.durationMs}`);
   assert.equal(m.isSpeaking, false);
   assert.deepEqual(starts, [1]);
   // Um estalo curto seguido de silêncio não vira trecho.

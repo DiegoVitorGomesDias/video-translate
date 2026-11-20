@@ -8,6 +8,19 @@ package com.videotranslate.app.audio
  * `minRms` fecha a janela; uma janela só de silêncio (vídeo pausado) é descartada. Cada
  * janela sai com motivo SILENCE para o segmentador de frases tratá-la como verso fechado.
  */
+/**
+ * Tamanho da janela do modo música (igual a MUSIC_WINDOWS em src/lib/audio/music.ts). O Whisper
+ * processa 30 s por chamada: o custo é por janela, não por segundo, então janelas curtas
+ * chamam o modelo mais vezes (a fila acumula na CPU) e tiram contexto; longas acertam mais.
+ */
+enum class MusicWindow(val windowMs: Int, val maxWindowMs: Int, val searchMs: Int, val label: String, val description: String) {
+    SHORT(4000, 5500, 1500, "Curta (~4 s)", "legenda antes, versos cortados, 2 a 3x mais chamadas do modelo (a fila acumula)"),
+    MEDIUM(7000, 9000, 2500, "Média (~7 s)", "meio-termo: um ou dois versos por janela"),
+    LONG(10000, 12000, 3000, "Longa (~10 s)", "mais precisa, versos inteiros, o modelo acompanha; legenda uns 10 a 15 s depois do início do verso");
+
+    val segmenterLabel: String get() = "Música (janela ${label.lowercase()})"
+}
+
 class MusicSegmenter(
     private val sampleRate: Int = 16000,
     windowMs: Int = WINDOW_MS,
@@ -18,13 +31,14 @@ class MusicSegmenter(
     minSoundMs: Int = MIN_SOUND_MS,
 ) : AudioSegmenter {
     companion object {
-        const val WINDOW_MS = 3500
-        const val MAX_WINDOW_MS = 5000
-        const val SEARCH_MS = 1500
-        const val SILENCE_MS = 800
+        const val WINDOW_MS = 10000
+        const val MAX_WINDOW_MS = 12000
+        const val SEARCH_MS = 3000
+        const val SILENCE_MS = 1000
         const val MIN_RMS = 0.004f
         const val MIN_SOUND_MS = 500
-        const val LABEL = "Música (janelas de ~3,5 s)"
+        /** Janelas na fila do STT acima disso são puladas (o modelo não acompanha). */
+        const val MAX_BACKLOG = 2
     }
 
     private fun ms(v: Int) = (v / 1000.0 * sampleRate).toInt()

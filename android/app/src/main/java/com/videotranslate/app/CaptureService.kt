@@ -111,7 +111,7 @@ class CaptureService : Service() {
                 TranscriptRepository.reset()
                 val settings = Settings.load(this)
                 musicMode = settings.audioMode == AudioMode.MUSIC
-                val profileLabel = if (musicMode) MusicSegmenter.LABEL else "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s) · sensibilidade ${settings.vadSensitivity.label.lowercase()}"
+                val profileLabel = if (musicMode) settings.musicWindow.segmenterLabel else "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s) · sensibilidade ${settings.vadSensitivity.label.lowercase()}"
                 TranscriptRepository.update { it.copy(capture = CaptureState.STARTING, statusText = "Iniciando…", appliedModel = settings.activeModel.label.substringBefore(" ("), appliedProfile = profileLabel) }
                 if (settings.overlayEnabled && android.provider.Settings.canDrawOverlays(this)) {
                     overlay = OverlayManager(this, settings).also { it.show() }
@@ -151,10 +151,20 @@ class CaptureService : Service() {
             //    ~7 s, sem detector nem AGC (o canto sobre instrumentos não tem as pausas que o
             //    detector procura, e o instrumental não deve ser amplificado).
             val sens = settings.vadSensitivity
-            val vad: AudioSegmenter = if (musicMode) MusicSegmenter(SAMPLE_RATE)
+            val vad: AudioSegmenter = if (musicMode) MusicSegmenter(SAMPLE_RATE, settings.musicWindow.windowMs, settings.musicWindow.maxWindowMs, settings.musicWindow.searchMs)
             else EnergyVad(SAMPLE_RATE, settings.vadProfile.silenceMs, settings.vadProfile.maxSegmentMs, minSpeechMs = sens.minSpeechMs, minThreshold = sens.minThreshold, noiseFactor = sens.noiseFactor)
             val agc = if (!musicMode && sens.agcMaxGain > 1f) Agc(target = 0.5f, maxGain = sens.agcMaxGain, sampleRate = SAMPLE_RATE) else null
-            vad.onSegment = { seg -> lastClosedId.accumulateAndGet(seg.id) { a, b -> maxOf(a, b) }; finalsPending.incrementAndGet(); finals.trySend(seg) }
+            vad.onSegment = { seg ->
+                lastClosedId.accumulateAndGet(seg.id) { a, b -> maxOf(a, b) }
+                // Música: o Whisper custa o mesmo por janela; com mais de 2 na fila o modelo não
+                // acompanha e a legenda só atrasaria. Pula a janela em vez de acumular.
+                if (musicMode && finalsPending.get() >= MusicSegmenter.MAX_BACKLOG) {
+                    Log.w(TAG, "STT atrasado (${finalsPending.get()} janelas na fila): janela ${seg.id} pulada")
+                    TranscriptRepository.update { it.copy(statusText = "Ouvindo · modelo atrasado, pulando trechos") }
+                } else {
+                    finalsPending.incrementAndGet(); finals.trySend(seg)
+                }
+            }
             vad.onLevel = { rms, _ -> TranscriptRepository.update { it.copy(level = minOf(1f, rms * 8)) } }
             startReading(rec, vad, agc)
 
