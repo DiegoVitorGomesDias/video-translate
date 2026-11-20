@@ -31,6 +31,7 @@ export class LocalTransformersProvider implements SpeechProvider {
   private readonly candidates: SttModelCandidate[];
   private readonly resolveUrl: (path: string) => string;
   private terms: string[] = [];
+  private music = false;
 
   constructor(opts: LocalTransformersOptions) {
     this.candidates = opts.candidates ?? candidatesFor('moonshine-tiny');
@@ -56,6 +57,7 @@ export class LocalTransformersProvider implements SpeechProvider {
       try {
         await this.initWorker(worker, candidate);
         if (this.terms.length > 0) this.post({ type: 'set-terms', terms: this.terms });
+        if (this.music) this.post({ type: 'set-mode', music: true });
         return;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -125,6 +127,11 @@ export class LocalTransformersProvider implements SpeechProvider {
   setPhrases(terms: string[]): void {
     this.terms = terms;
     this.post({ type: 'set-terms', terms });
+  }
+
+  setMusicMode(on: boolean): void {
+    this.music = on;
+    this.post({ type: 'set-mode', music: on });
   }
 
   transcribe(segment: AudioSegment): void {

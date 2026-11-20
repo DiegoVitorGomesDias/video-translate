@@ -20,12 +20,16 @@ import android.os.IBinder
 import android.util.Log
 import com.videotranslate.app.audio.Agc
 import com.videotranslate.app.audio.AudioSegment
+import com.videotranslate.app.audio.AudioSegmenter
 import com.videotranslate.app.audio.EnergyVad
+import com.videotranslate.app.audio.MusicSegmenter
 import com.videotranslate.app.audio.SegmentReason
 import com.videotranslate.app.overlay.OverlayManager
 import com.videotranslate.app.stt.ModelDownloader
 import com.videotranslate.app.stt.SherpaRecognizer
+import com.videotranslate.app.stt.SttKind
 import com.videotranslate.app.text.EndReason
+import com.videotranslate.app.text.LyricsFilter
 import com.videotranslate.app.text.SentenceSegmenter
 import com.videotranslate.app.translate.CachedTranslationProvider
 import com.videotranslate.app.translate.LibreTranslateProvider
@@ -73,6 +77,7 @@ class CaptureService : Service() {
     private var readThread: Thread? = null
     @Volatile private var reading = false
     private var recognizer: SherpaRecognizer? = null
+    private var musicMode = false
     private var translator: TranslationProvider? = null
     private var overlay: OverlayManager? = null
     private val segmenter = SentenceSegmenter()
@@ -92,8 +97,9 @@ class CaptureService : Service() {
                 running = true
                 TranscriptRepository.reset()
                 val settings = Settings.load(this)
-                val profileLabel = "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s) · sensibilidade ${settings.vadSensitivity.label.lowercase()}"
-                TranscriptRepository.update { it.copy(capture = CaptureState.STARTING, statusText = "Iniciando…", appliedModel = settings.sttModel.label.substringBefore(" ("), appliedProfile = profileLabel) }
+                musicMode = settings.audioMode == AudioMode.MUSIC
+                val profileLabel = if (musicMode) MusicSegmenter.LABEL else "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s) · sensibilidade ${settings.vadSensitivity.label.lowercase()}"
+                TranscriptRepository.update { it.copy(capture = CaptureState.STARTING, statusText = "Iniciando…", appliedModel = settings.activeModel.label.substringBefore(" ("), appliedProfile = profileLabel) }
                 if (settings.overlayEnabled && android.provider.Settings.canDrawOverlays(this)) {
                     overlay = OverlayManager(this, settings).also { it.show() }
                 }
@@ -127,10 +133,14 @@ class CaptureService : Service() {
             val rec = if (useMic) openMicrophone() else openInternalCapture(intent)
             record = rec
 
-            // 2. VAD + fila de trechos; a leitura começa já (o modelo carrega em paralelo).
+            // 2. Segmentador + fila de trechos; a leitura começa já (o modelo carrega em paralelo).
+            //    Fala: detector por energia (com sensibilidade e AGC). Música: janelas fixas de
+            //    ~7 s, sem detector nem AGC (o canto sobre instrumentos não tem as pausas que o
+            //    detector procura, e o instrumental não deve ser amplificado).
             val sens = settings.vadSensitivity
-            val vad = EnergyVad(SAMPLE_RATE, settings.vadProfile.silenceMs, settings.vadProfile.maxSegmentMs, minSpeechMs = sens.minSpeechMs, minThreshold = sens.minThreshold, noiseFactor = sens.noiseFactor)
-            val agc = if (sens.agcMaxGain > 1f) Agc(target = 0.5f, maxGain = sens.agcMaxGain, sampleRate = SAMPLE_RATE) else null
+            val vad: AudioSegmenter = if (musicMode) MusicSegmenter(SAMPLE_RATE)
+            else EnergyVad(SAMPLE_RATE, settings.vadProfile.silenceMs, settings.vadProfile.maxSegmentMs, minSpeechMs = sens.minSpeechMs, minThreshold = sens.minThreshold, noiseFactor = sens.noiseFactor)
+            val agc = if (!musicMode && sens.agcMaxGain > 1f) Agc(target = 0.5f, maxGain = sens.agcMaxGain, sampleRate = SAMPLE_RATE) else null
             vad.onSegment = { seg -> closedSegments += seg.id; finals.trySend(seg) }
             vad.onLevel = { rms, _ -> TranscriptRepository.update { it.copy(level = minOf(1f, rms * 8)) } }
             startReading(rec, vad, agc)
@@ -138,21 +148,27 @@ class CaptureService : Service() {
             // 3. Tradutor (ML Kit por padrão; LibreTranslate se configurado e saudável).
             scope.launch { translator = pickTranslator(settings) }
 
-            // 4. Modelo de STT (download no primeiro uso).
-            TranscriptRepository.update { it.copy(capture = CaptureState.LOADING_MODEL, statusText = "Preparando modelo ${settings.sttModel.label}…", progress = 0f) }
+            // 4. Modelo de STT (download no primeiro uso). No modo música é um Whisper.
+            val model = settings.activeModel
+            TranscriptRepository.update { it.copy(capture = CaptureState.LOADING_MODEL, statusText = "Preparando modelo ${model.label}…", progress = 0f) }
             val downloader = ModelDownloader(this)
             withContext(Dispatchers.IO) {
-                downloader.ensure(settings.sttModel) { done, total ->
+                downloader.ensure(model) { done, total ->
                     val p = if (total > 0) done.toFloat() / total else null
                     TranscriptRepository.update { it.copy(statusText = "Baixando modelo ${done / 1_000_000} MB${if (total > 0) " de ${total / 1_000_000} MB" else ""}", progress = p) }
                 }
-                recognizer = SherpaRecognizer(downloader.modelDir(settings.sttModel))
+                val files = downloader.modelFiles(model) ?: throw IllegalStateException("arquivos do modelo não encontrados")
+                // Whisper roda uma janela de 30 s por chamada: vale usar mais núcleos.
+                val threads = if (model.kind == SttKind.WHISPER) Runtime.getRuntime().availableProcessors().coerceIn(2, 4) else 2
+                recognizer = SherpaRecognizer(files, threads)
             }
-            TranscriptRepository.update { it.copy(capture = CaptureState.LISTENING, statusText = "Ouvindo · ${settings.sttModel.label}", progress = null) }
-            overlay?.setStatus("Ouvindo · ${settings.sttModel.label.substringBefore(" (")} · ${settings.vadProfile.label} · ${settings.vadSensitivity.label}")
+            val modeLabel = if (musicMode) " · modo música" else ""
+            TranscriptRepository.update { it.copy(capture = CaptureState.LISTENING, statusText = "Ouvindo · ${model.label.substringBefore(" (")}$modeLabel", progress = null) }
+            overlay?.setStatus("Ouvindo · ${model.label.substringBefore(" (")} · ${if (musicMode) "Música" else "${settings.vadProfile.label} · ${settings.vadSensitivity.label}"}")
 
-            // 5. Parciais a cada 1,5 s enquanto há trecho aberto.
-            scope.launch {
+            // 5. Parciais a cada 1,5 s enquanto há trecho aberto (não no modo música: o Whisper
+            //    custa o mesmo para um parcial e para o final, e a janela já é longa).
+            if (!musicMode) scope.launch {
                 while (isActive) {
                     delay(PARTIAL_INTERVAL_MS)
                     if (vad.isSpeaking && vad.currentDurationMs >= 1000) vad.peek()?.let { partials.trySend(vad.currentSegmentId to it) }
@@ -178,7 +194,8 @@ class CaptureService : Service() {
 
     private fun handleFinal(seg: AudioSegment) {
         val rec = recognizer ?: return
-        val text = rec.transcribe(Agc.normalizePeak(seg.audio), seg.sampleRate)
+        var text = rec.transcribe(Agc.normalizePeak(seg.audio), seg.sampleRate)
+        if (musicMode) text = LyricsFilter.clean(text)
         val reason = when (seg.reason) { SegmentReason.SILENCE -> EndReason.SILENCE; SegmentReason.MAX_LENGTH -> EndReason.MAX_LENGTH; SegmentReason.FLUSH -> EndReason.FLUSH }
         val sentences = segmenter.push(text, System.currentTimeMillis(), reason)
         TranscriptRepository.update { it.copy(partial = "") }
@@ -262,7 +279,7 @@ class CaptureService : Service() {
         return rec
     }
 
-    private fun startReading(rec: AudioRecord, vad: EnergyVad, agc: Agc?) {
+    private fun startReading(rec: AudioRecord, vad: AudioSegmenter, agc: Agc?) {
         reading = true
         rec.startRecording()
         readThread = Thread({

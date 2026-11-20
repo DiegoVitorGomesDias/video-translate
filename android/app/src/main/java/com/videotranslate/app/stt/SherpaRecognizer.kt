@@ -5,27 +5,51 @@ import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineMoonshineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import java.io.File
 
-/** Reconhecedor offline (sherpa-onnx) com Moonshine. Uma instância por sessão; chamadas serializadas. */
-class SherpaRecognizer(modelDir: File, numThreads: Int = 2) : AutoCloseable {
+/**
+ * Reconhecedor offline (sherpa-onnx) com Moonshine ou Whisper. Uma instância por sessão;
+ * chamadas serializadas.
+ *
+ * O Whisper processa sempre uma janela de 30 s (o trecho é preenchido com silêncio), por
+ * isso cada chamada custa o mesmo para 3 s ou 9 s de áudio; ele é usado no modo música,
+ * com janelas longas.
+ */
+class SherpaRecognizer(files: ModelFiles, numThreads: Int = 2) : AutoCloseable {
     private val recognizer: OfflineRecognizer
 
     init {
-        val cfg = OfflineRecognizerConfig(
-            featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
-            modelConfig = OfflineModelConfig(
+        val modelConfig = when (files) {
+            is ModelFiles.Moonshine -> OfflineModelConfig(
                 moonshine = OfflineMoonshineModelConfig(
-                    preprocessor = File(modelDir, "preprocess.onnx").path,
-                    encoder = File(modelDir, "encode.int8.onnx").path,
-                    uncachedDecoder = File(modelDir, "uncached_decode.int8.onnx").path,
-                    cachedDecoder = File(modelDir, "cached_decode.int8.onnx").path,
+                    preprocessor = File(files.dir, "preprocess.onnx").path,
+                    encoder = File(files.dir, "encode.int8.onnx").path,
+                    uncachedDecoder = File(files.dir, "uncached_decode.int8.onnx").path,
+                    cachedDecoder = File(files.dir, "cached_decode.int8.onnx").path,
                 ),
-                tokens = File(modelDir, "tokens.txt").path,
+                tokens = File(files.dir, "tokens.txt").path,
                 numThreads = numThreads,
                 debug = false,
                 provider = "cpu",
-            ),
+            )
+            is ModelFiles.Whisper -> OfflineModelConfig(
+                whisper = OfflineWhisperModelConfig(
+                    encoder = files.encoder.path,
+                    decoder = files.decoder.path,
+                    language = "en",
+                    task = "transcribe",
+                ),
+                tokens = files.tokens.path,
+                modelType = "whisper",
+                numThreads = numThreads,
+                debug = false,
+                provider = "cpu",
+            )
+        }
+        val cfg = OfflineRecognizerConfig(
+            featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
+            modelConfig = modelConfig,
             decodingMethod = "greedy_search",
         )
         recognizer = OfflineRecognizer(assetManager = null, config = cfg)

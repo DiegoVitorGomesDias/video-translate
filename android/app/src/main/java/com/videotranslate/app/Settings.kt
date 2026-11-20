@@ -5,13 +5,20 @@ import com.videotranslate.app.audio.VadProfile
 import com.videotranslate.app.audio.VadSensitivity
 import com.videotranslate.app.stt.SttModel
 
+
 enum class AudioSource { INTERNAL, MICROPHONE }
+
+/** Fala (detector de fala + Moonshine) ou música (janelas fixas + Whisper, para letras cantadas). */
+enum class AudioMode(val label: String) { SPEECH("Fala"), MUSIC("Música") }
 
 data class Settings(
     val audioSource: AudioSource = AudioSource.INTERNAL,
     val sttModel: SttModel = SttModel.MOONSHINE_TINY,
     val vadProfile: VadProfile = VadProfile.NORMAL,
     val vadSensitivity: VadSensitivity = VadSensitivity.NORMAL,
+    val audioMode: AudioMode = AudioMode.SPEECH,
+    /** Modelo usado no modo música (só Whisper). */
+    val musicModel: SttModel = SttModel.WHISPER_BASE_EN,
     val fontSp: Int = 18,
     val libreUrl: String = "",
     val libreApiKey: String = "",
@@ -19,6 +26,9 @@ data class Settings(
     val overlayOpacity: Float = 0.85f,
     val overlayLines: Int = 2,
 ) {
+    /** Modelo de STT efetivo para o modo escolhido. */
+    val activeModel: SttModel get() = if (audioMode == AudioMode.MUSIC) musicModel else sttModel
+
     companion object {
         private const val PREFS = "settings"
 
@@ -29,6 +39,8 @@ data class Settings(
                 sttModel = SttModel.byId(p.getString("sttModel", null)),
                 vadProfile = runCatching { VadProfile.valueOf(p.getString("vadProfile", "NORMAL")!!) }.getOrDefault(VadProfile.NORMAL),
                 vadSensitivity = runCatching { VadSensitivity.valueOf(p.getString("vadSensitivity", "NORMAL")!!) }.getOrDefault(VadSensitivity.NORMAL),
+                audioMode = runCatching { AudioMode.valueOf(p.getString("audioMode", "SPEECH")!!) }.getOrDefault(AudioMode.SPEECH),
+                musicModel = SttModel.byIdOrNull(p.getString("musicModel", null))?.takeIf { it.forMusic } ?: SttModel.WHISPER_BASE_EN,
                 fontSp = p.getInt("fontSp", 18),
                 libreUrl = p.getString("libreUrl", "") ?: "",
                 libreApiKey = p.getString("libreApiKey", "") ?: "",
@@ -44,6 +56,8 @@ data class Settings(
                 .putString("sttModel", s.sttModel.id)
                 .putString("vadProfile", s.vadProfile.name)
                 .putString("vadSensitivity", s.vadSensitivity.name)
+                .putString("audioMode", s.audioMode.name)
+                .putString("musicModel", s.musicModel.id)
                 .putInt("fontSp", s.fontSp)
                 .putString("libreUrl", s.libreUrl)
                 .putString("libreApiKey", s.libreApiKey)

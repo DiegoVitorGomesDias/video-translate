@@ -5,6 +5,7 @@
 
 import {
   type AppliedConfig,
+  type AudioModeId,
   isOffscreenMessage,
   type BroadcastEvent,
   type GetTranscriptsResponse,
@@ -20,7 +21,9 @@ import {
 import { PCM_WORKLET_NAME, TARGET_SAMPLE_RATE } from '@/lib/audio/constants';
 import { SileroVad } from '@/lib/audio/silero-vad';
 import { Agc, normalizePeak } from '@/lib/audio/agc';
-import { VAD_PROFILES, VAD_SENSITIVITIES } from '@/lib/audio/vad';
+import { VAD_PROFILES, VAD_SENSITIVITIES, type SpeechSegmenter } from '@/lib/audio/vad';
+import { MusicSegmenter } from '@/lib/audio/music';
+import { cleanLyrics } from '@/lib/stt/lyrics';
 import { extractTermsFromTitle, mergeTerms, parseGlossary } from '@/lib/context';
 import { ChromeSpeechProvider } from '@/lib/stt/chrome-speech';
 import { DEFAULT_SERVER_SPEECH, ServerSpeechProvider, type ServerSpeechConfig } from '@/lib/stt/server-speech';
@@ -39,7 +42,7 @@ interface CaptureSession {
   ctx: AudioContext;
   source: MediaStreamAudioSourceNode;
   worklet: AudioWorkletNode;
-  vad: SileroVad;
+  vad: SpeechSegmenter & { dispose?(): void };
   provider: SpeechProvider;
   tabId: number;
   partialTimer: number;
@@ -84,7 +87,11 @@ function toEvent(r: TranscriptResult): TranscriptEvent {
   };
 }
 
+let musicMode = false;
+
 function handleResult(r: TranscriptResult): void {
+  // Música: tira "♪"/"[Music]" e descarta as frases que o Whisper inventa em trechos instrumentais.
+  if (musicMode) r = { ...r, text: cleanLyrics(r.text) };
   const ev = toEvent(r);
   if (r.isFinal) {
     finals.push(ev);
@@ -141,15 +148,17 @@ async function startCapture(
   sensitivity: VadSensitivityId,
   initialContext: SpeechContext,
   server: ServerSpeechConfig,
+  audioMode: AudioModeId,
 ): Promise<void> {
   if (session) {
     log('já capturando; parando a sessão anterior');
     await stopCapture();
   }
-  log(`iniciando captura da aba ${tabId} (motor ${engine}, modelo ${model}, separação ${profile}, sensibilidade ${sensitivity})`);
+  musicMode = audioMode === 'music';
+  log(`iniciando captura da aba ${tabId} (motor ${engine}, modelo ${model}, separação ${profile}, sensibilidade ${sensitivity}, modo ${audioMode})`);
   finals.length = 0;
   lastPartial = null;
-  applied = { sttModel: model, vadProfile: profile, vadSensitivity: sensitivity, sttEngine: engine, activeEngine: engine };
+  applied = { sttModel: model, vadProfile: profile, vadSensitivity: sensitivity, audioMode, sttEngine: engine, activeEngine: engine };
 
   // 1. Stream da aba a partir do streamId obtido no background.
   const stream = await navigator.mediaDevices.getUserMedia({
@@ -178,27 +187,37 @@ async function startCapture(
   source.connect(worklet);
   worklet.connect(ctx.destination); // saída é silêncio; só garante que process() rode
 
-  // 4. VAD (Silero, com reserva por energia) + provedor.
+  // 4. Segmentador + provedor. Fala: Silero VAD (com reserva por energia). Música: janelas
+  //    fixas de ~7 s sem detector (o canto sobre instrumentos não tem as pausas que o Silero
+  //    procura, e ele oscila entre voz e instrumental).
   const vp = VAD_PROFILES[profile] ?? VAD_PROFILES.normal;
   const vs = VAD_SENSITIVITIES[sensitivity] ?? VAD_SENSITIVITIES.normal;
-  const vad = new SileroVad({
-    sampleRate: TARGET_SAMPLE_RATE,
-    silenceMs: vp.silenceMs,
-    maxSegmentMs: vp.maxSegmentMs,
-    minSpeechMs: vs.minSpeechMs,
-    startThreshold: vs.startThreshold,
-    endThreshold: vs.endThreshold,
-    noiseFactor: vs.noiseFactor,
-    resolveUrl,
-  });
-  vad.onEngine = (vadEngine, message) => {
-    log(`detector de fala: ${vadEngine}${message ? ` (${message})` : ''}`);
-    if (applied) {
-      applied = { ...applied, vadEngine };
-      broadcast({ type: 'capture-status', status: 'started', applied });
-    }
-  };
+  let vad: SpeechSegmenter & { dispose?(): void };
+  if (musicMode) {
+    vad = new MusicSegmenter({ sampleRate: TARGET_SAMPLE_RATE });
+    applied = { ...applied, vadEngine: 'energy' };
+  } else {
+    const silero = new SileroVad({
+      sampleRate: TARGET_SAMPLE_RATE,
+      silenceMs: vp.silenceMs,
+      maxSegmentMs: vp.maxSegmentMs,
+      minSpeechMs: vs.minSpeechMs,
+      startThreshold: vs.startThreshold,
+      endThreshold: vs.endThreshold,
+      noiseFactor: vs.noiseFactor,
+      resolveUrl,
+    });
+    silero.onEngine = (vadEngine, message) => {
+      log(`detector de fala: ${vadEngine}${message ? ` (${message})` : ''}`);
+      if (applied) {
+        applied = { ...applied, vadEngine };
+        broadcast({ type: 'capture-status', status: 'started', applied });
+      }
+    };
+    vad = silero;
+  }
   let provider = createProvider(model, engine, server);
+  provider.setMusicMode?.(musicMode);
 
   let providerReady = false;
   let pendingSegments = 0;
@@ -218,16 +237,17 @@ async function startCapture(
     provider.transcribe({ ...seg, audio: normalizePeak(seg.audio) });
   };
 
-  // Parciais: a cada 1,5 s, se há um trecho aberto com áudio suficiente.
+  // Parciais: a cada 1,5 s, se há um trecho aberto com áudio suficiente. No modo música
+  // não há parciais: o Whisper custa o mesmo para um parcial e para o final da janela.
   let lastPartialAt = 0;
   let peeking = false;
   const partialTimer = window.setInterval(() => {
-    if (!providerReady || provider.consumesStream || peeking) return;
+    if (musicMode || !providerReady || provider.consumesStream || peeking) return;
     if (!vad.isSpeaking || vad.currentDurationMs < PARTIAL_MIN_MS) return;
     if (performance.now() - lastPartialAt < PARTIAL_INTERVAL_MS - 50) return;
     const segmentId = vad.currentSegmentId;
     peeking = true;
-    void vad.peek().then((audio) => {
+    void Promise.resolve(vad.peek()).then((audio) => {
       peeking = false;
       if (!audio || !session) return;
       lastPartialAt = performance.now();
@@ -239,8 +259,9 @@ async function startCapture(
   };
 
   // Ganho automático antes do detector (conforme a sensibilidade): sussurros e falas ao
-  // fundo de música ficavam abaixo do limiar do Silero e nem viravam trecho.
-  const agc = vs.agcMaxGain > 1 ? new Agc({ sampleRate: TARGET_SAMPLE_RATE, target: 0.5, maxGain: vs.agcMaxGain }) : null;
+  // fundo de música ficavam abaixo do limiar do Silero e nem viravam trecho. (Não no modo
+  // música: o nível do instrumental não deve ser amplificado; o trecho é normalizado depois.)
+  const agc = !musicMode && vs.agcMaxGain > 1 ? new Agc({ sampleRate: TARGET_SAMPLE_RATE, target: 0.5, maxGain: vs.agcMaxGain }) : null;
   worklet.port.onmessage = (e: MessageEvent<Float32Array>) => vad.push(agc ? agc.process(e.data) : e.data);
 
   // Glossário (título da aba + opções) para o reconhecimento do Chrome. O offscreen não
@@ -289,6 +310,7 @@ async function startCapture(
       console.warn(`[offscreen] motor ${engine} indisponível, usando o modelo local:`, err);
       await provider.stop().catch(() => undefined);
       provider = createProvider(model, 'local');
+      provider.setMusicMode?.(musicMode);
       wrapResult(provider);
       session.provider = provider;
       applied = { ...applied!, activeEngine: 'local' };
@@ -315,7 +337,7 @@ async function stopCapture(): Promise<void> {
   s.worklet.port.onmessage = null;
   // O provedor vai ser encerrado já; um último trecho não teria tempo de ser transcrito.
   s.vad.onSegment = null;
-  s.vad.dispose();
+  s.vad.dispose?.();
   s.source.disconnect();
   s.worklet.disconnect();
   s.stream.getTracks().forEach((t) => t.stop());
@@ -339,6 +361,7 @@ browser.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
           m.vadSensitivity ?? 'normal',
           m.context ?? { tabTitle: '', useTabContext: true, glossary: '', ignoredTerms: [] },
           { ...DEFAULT_SERVER_SPEECH, ...(m.server ?? {}) },
+          m.audioMode ?? 'speech',
         );
         return { ok: true };
       case 'set-context':

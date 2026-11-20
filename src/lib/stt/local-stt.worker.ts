@@ -33,6 +33,8 @@ export type WorkerInMessage =
   | TranscribeRequest
   /** Termos do glossário (nomes, siglas) para o prompt do Whisper. */
   | { type: 'set-terms'; terms: string[] }
+  /** Modo música: prompt sem as frases anteriores e com dica de canto; sem filtro de eco. */
+  | { type: 'set-mode'; music: boolean }
   | { type: 'dispose' };
 
 export type WorkerOutMessage =
@@ -52,6 +54,9 @@ let multilingual = false;
 let initTokenIds: number[] = [];
 let prevSotId: number | null = null;
 let terms: string[] = [];
+let musicMode = false;
+/** Dica no prompt do Whisper para transcrever canto em vez de devolver "♪" ou texto de legendas. */
+const MUSIC_PROMPT = 'Lyrics:';
 /** Últimas frases finais, usadas como contexto no prompt do Whisper. */
 const recentFinals: string[] = [];
 const RECENT_LIMIT = 3;
@@ -185,7 +190,10 @@ function setupPrompt(pipe: AutomaticSpeechRecognitionPipeline): void {
 function promptText(): string {
   const parts: string[] = [];
   if (terms.length > 0) parts.push(`${terms.slice(0, 30).join(', ')}.`);
-  parts.push(...recentFinals);
+  // Música: um refrão repete de verdade; as frases anteriores no prompt fariam o Whisper
+  // ecoá-las (e o filtro de eco descartar o refrão). Só o glossário e a dica de canto.
+  if (musicMode) parts.push(MUSIC_PROMPT);
+  else parts.push(...recentFinals);
   return parts.join(' ').replace(/\s+/g, ' ').trim();
 }
 
@@ -294,7 +302,7 @@ async function decode(audio: Float32Array, opts: Record<string, unknown>, prompt
   let text = (Array.isArray(output) ? output.map((o) => o.text).join(' ') : output.text).trim();
   if (prompt) {
     text = stripPrompt(text, prompt.text);
-    if (isEcho(text)) text = '';
+    if (!musicMode && isEcho(text)) text = '';
   }
   const rep = checkRepetition(text);
   return { text: rep.text, looped: rep.looped };
@@ -327,7 +335,7 @@ async function transcribe(req: TranscribeRequest): Promise<void> {
     if (req.isFinal) {
       lastFinalInferenceMs = inferenceMs;
       // Um trecho alucinado não entra no prompt do próximo (realimentaria o laço).
-      if (!looped) rememberFinal(text);
+      if (!looped && !musicMode) rememberFinal(text);
     }
     post({ type: 'result', id: req.id, segmentId: req.segmentId, isFinal: req.isFinal, text, inferenceMs });
   } catch (err) {
@@ -346,6 +354,10 @@ self.onmessage = (event: MessageEvent<WorkerInMessage>) => {
       break;
     case 'set-terms':
       terms = msg.terms;
+      break;
+    case 'set-mode':
+      musicMode = msg.music;
+      recentFinals.length = 0;
       break;
     case 'dispose':
       void (async () => {

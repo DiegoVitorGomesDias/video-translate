@@ -3,7 +3,8 @@ import { SentenceSegmenter, normalize, type Sentence } from '@/lib/segmenter';
 import { modelLabelFor } from '@/lib/stt/models';
 import type { VadEngine } from '@/lib/audio/silero-vad';
 import { VAD_PROFILES, type VadProfile } from '@/lib/audio/vad';
-import type { SttModelId } from '@/lib/messages';
+import { MUSIC_WINDOW } from '@/lib/audio/music';
+import type { AudioModeId, SttModelId } from '@/lib/messages';
 import { createTranslator, type LocalOpusStatus, type TranslatorSelection } from '@/lib/translate';
 import { ContextualTranslationProvider } from '@/lib/translate/contextual';
 import { correctTranscript, mergeTerms, parseGlossary } from '@/lib/context';
@@ -37,7 +38,7 @@ export function App() {
   const [stuckToEnd, setStuckToEnd] = useState(true);
   const [mic, setMic] = useState<MicDevice | null>(null);
   const [mics, setMics] = useState<MicDevice[]>([]);
-  const [applied, setApplied] = useState<{ sttModel: SttModelId; vadProfile: VadProfile } | null>(null);
+  const [applied, setApplied] = useState<{ sttModel: SttModelId; vadProfile: VadProfile; audioMode: AudioModeId } | null>(null);
   const [vadEngine, setVadEngine] = useState<VadEngine | null>(null);
 
   const capture = useRef(new MicCapture());
@@ -122,10 +123,12 @@ export function App() {
   const start = async () => {
     setError(null);
     setStarting(true);
-    setApplied({ sttModel: settings.sttModel, vadProfile: settings.sentenceSplit });
+    const music = settings.audioMode === 'music';
+    const model = music ? settings.musicModel : settings.sttModel;
+    setApplied({ sttModel: model, vadProfile: settings.sentenceSplit, audioMode: settings.audioMode });
     try {
       await capture.current.start(
-        settings.sttModel,
+        model,
         {
           onStatus: setStt,
           onResult,
@@ -142,6 +145,7 @@ export function App() {
         },
         settings.micDeviceId,
         settings.sentenceSplit,
+        settings.audioMode,
       );
       setRunning(true);
     } catch (err) {
@@ -214,13 +218,19 @@ export function App() {
             : 'sem tradução';
 
   const configLine = useMemo(() => {
-    const cfg = applied ?? { sttModel: settings.sttModel, vadProfile: settings.sentenceSplit };
+    const wantedModel = settings.audioMode === 'music' ? settings.musicModel : settings.sttModel;
+    const cfg = applied ?? { sttModel: wantedModel, vadProfile: settings.sentenceSplit, audioMode: settings.audioMode };
+    const music = cfg.audioMode === 'music';
     const modelLabel = modelLabelFor(running && stt?.state === 'ready' ? stt.model : undefined, cfg.sttModel);
     const backend = running && stt?.state === 'ready' ? (stt.device === 'webgpu' ? 'GPU' : 'WASM') : null;
     const vp = VAD_PROFILES[cfg.vadProfile] ?? VAD_PROFILES.normal;
-    const vadLabel = running && vadEngine ? (vadEngine === 'silero' ? ' · Silero' : ' · energia') : '';
-    const changed = !!applied && running && (settings.sttModel !== applied.sttModel || settings.sentenceSplit !== applied.vadProfile);
-    return { model: `${modelLabel}${backend ? ` · ${backend}` : ''}`, split: `Separação: ${vp.label} (${vp.silenceMs / 1000} s / ${vp.maxSegmentMs / 1000} s)${vadLabel}`, changed };
+    const vadLabel = running && vadEngine && !music ? (vadEngine === 'silero' ? ' · Silero' : ' · energia') : '';
+    const changed = !!applied && running && (wantedModel !== applied.sttModel || settings.audioMode !== applied.audioMode || (!music && settings.sentenceSplit !== applied.vadProfile));
+    return {
+      model: `${modelLabel}${backend ? ` · ${backend}` : ''}`,
+      split: music ? `Modo música: janelas de ~${MUSIC_WINDOW.windowMs / 1000} s, sem detector de fala` : `Separação: ${vp.label} (${vp.silenceMs / 1000} s / ${vp.maxSegmentMs / 1000} s)${vadLabel}`,
+      changed,
+    };
   }, [applied, settings, stt, running, vadEngine]);
 
   const pendingLine = [segmenter.current.pending, partial].filter(Boolean).join(' ');

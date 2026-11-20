@@ -133,6 +133,7 @@ export class ServerSpeechProvider implements SpeechProvider {
   private terms: string[] = [];
   private recent: string[] = [];
   private lastFinalMs = 0;
+  private music = false;
 
   constructor(cfg: ServerSpeechConfig) {
     this.cfg = cfg;
@@ -148,6 +149,11 @@ export class ServerSpeechProvider implements SpeechProvider {
 
   setPhrases(terms: string[]): void {
     this.terms = terms;
+  }
+
+  setMusicMode(on: boolean): void {
+    this.music = on;
+    this.recent = [];
   }
 
   transcribe(segment: AudioSegment): void {
@@ -195,7 +201,9 @@ export class ServerSpeechProvider implements SpeechProvider {
   private prompt(): string {
     const parts: string[] = [];
     if (this.terms.length > 0) parts.push(`${this.terms.slice(0, 30).join(', ')}.`);
-    parts.push(...this.recent);
+    // Música: só glossário e dica de canto (ver local-stt.worker.ts).
+    if (this.music) parts.push('Lyrics:');
+    else parts.push(...this.recent);
     return parts.join(' ').replace(/\s+/g, ' ').trim().slice(-600);
   }
 
@@ -207,7 +215,7 @@ export class ServerSpeechProvider implements SpeechProvider {
         const started = performance.now();
         try {
           let text = await requestTranscription(this.cfg, job.audio, job.sampleRate, this.prompt());
-          if (this.isEcho(text)) text = '';
+          if (!this.music && this.isEcho(text)) text = '';
           let rep = checkRepetition(text);
           if (rep.looped && this.prompt()) {
             // O contexto do prompt pode ter induzido o laço: tenta de novo sem ele.
@@ -220,7 +228,7 @@ export class ServerSpeechProvider implements SpeechProvider {
           if (job.isFinal) {
             this.lastFinalMs = inferenceMs;
             // Um trecho alucinado não entra no prompt do próximo (realimentaria o laço).
-            if (text && !rep.looped) {
+            if (text && !rep.looped && !this.music) {
               this.recent.push(text);
               while (this.recent.length > RECENT_LIMIT) this.recent.shift();
             }

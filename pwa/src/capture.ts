@@ -4,7 +4,10 @@
 import workletUrl from '@/lib/audio/pcm-worklet.ts?worker&url';
 import { PCM_WORKLET_NAME, TARGET_SAMPLE_RATE } from '@/lib/audio/constants';
 import { SileroVad, type VadEngine } from '@/lib/audio/silero-vad';
-import { VAD_PROFILES, type VadProfile } from '@/lib/audio/vad';
+import { VAD_PROFILES, type SpeechSegmenter, type VadProfile } from '@/lib/audio/vad';
+import { MusicSegmenter } from '@/lib/audio/music';
+import { cleanLyrics } from '@/lib/stt/lyrics';
+import type { AudioModeId } from '@/lib/messages';
 import { LocalTransformersProvider } from '@/lib/stt/local-transformers';
 import { candidatesFor } from '@/lib/stt/models';
 import type { SpeechProvider, SpeechProviderStatus, TranscriptResult } from '@/lib/stt/SpeechProvider';
@@ -72,7 +75,7 @@ export class MicCapture {
   private preferredId = '';
   private current: MicDevice | null = null;
   private onDeviceChange: (() => void) | null = null;
-  private vad: SileroVad | null = null;
+  private vad: (SpeechSegmenter & { dispose?(): void }) | null = null;
   private provider: SpeechProvider | null = null;
   private terms: string[] = [];
   private partialTimer = 0;
@@ -86,7 +89,7 @@ export class MicCapture {
     return this.current;
   }
 
-  async start(model: SttModelId, h: MicCaptureHandlers, preferredMicId = '', profile: VadProfile = 'normal'): Promise<void> {
+  async start(model: SttModelId, h: MicCaptureHandlers, preferredMicId = '', profile: VadProfile = 'normal', audioMode: AudioModeId = 'speech'): Promise<void> {
     if (this.running) return;
     this.handlers = h;
     this.preferredId = preferredMicId;
@@ -107,14 +110,24 @@ export class MicCapture {
     worklet.connect(ctx.destination); // saída é silêncio; só garante que process() rode
     this.worklet = worklet;
 
+    // Fala: Silero VAD. Música: janelas fixas de ~7 s sem detector (ver src/lib/audio/music.ts).
+    const music = audioMode === 'music';
     const vp = VAD_PROFILES[profile] ?? VAD_PROFILES.normal;
-    const vad = new SileroVad({ sampleRate: TARGET_SAMPLE_RATE, silenceMs: vp.silenceMs, maxSegmentMs: vp.maxSegmentMs, resolveUrl: resolveAsset });
+    let vad: SpeechSegmenter & { dispose?(): void };
+    if (music) {
+      vad = new MusicSegmenter({ sampleRate: TARGET_SAMPLE_RATE });
+      h.onVadEngine?.('energy');
+    } else {
+      const silero = new SileroVad({ sampleRate: TARGET_SAMPLE_RATE, silenceMs: vp.silenceMs, maxSegmentMs: vp.maxSegmentMs, resolveUrl: resolveAsset });
+      silero.onEngine = (engine) => h.onVadEngine?.(engine);
+      vad = silero;
+    }
     this.vad = vad;
-    vad.onEngine = (engine) => h.onVadEngine?.(engine);
     const provider = new LocalTransformersProvider({ candidates: candidatesFor(model), resolveUrl: resolveAsset });
     this.provider = provider;
+    provider.setMusicMode(music);
     provider.onStatus = h.onStatus;
-    provider.onResult = h.onResult;
+    provider.onResult = music ? (r) => h.onResult({ ...r, text: cleanLyrics(r.text) }) : h.onResult;
     if (this.terms.length > 0) provider.setPhrases?.(this.terms);
     vad.onLevel = (level, isSpeech) => h.onLevel?.(level, isSpeech);
 
@@ -128,11 +141,11 @@ export class MicCapture {
     };
     let peeking = false;
     this.partialTimer = window.setInterval(() => {
-      if (!ready || peeking || !vad.isSpeaking || vad.currentDurationMs < PARTIAL_MIN_MS) return;
+      if (music || !ready || peeking || !vad.isSpeaking || vad.currentDurationMs < PARTIAL_MIN_MS) return;
       if (performance.now() - lastPartialAt < PARTIAL_INTERVAL_MS - 50) return;
       const segmentId = vad.currentSegmentId;
       peeking = true;
-      void vad.peek().then((audio) => {
+      void Promise.resolve(vad.peek()).then((audio) => {
         peeking = false;
         if (!audio || this.vad !== vad) return;
         lastPartialAt = performance.now();
@@ -223,7 +236,7 @@ export class MicCapture {
     window.clearInterval(this.partialTimer);
     if (this.worklet) this.worklet.port.onmessage = null;
     if (this.vad) this.vad.onSegment = null;
-    this.vad?.dispose();
+    this.vad?.dispose?.();
     this.worklet?.disconnect();
     this.stream?.getTracks().forEach((t) => t.stop());
     await this.ctx?.close().catch(() => undefined);

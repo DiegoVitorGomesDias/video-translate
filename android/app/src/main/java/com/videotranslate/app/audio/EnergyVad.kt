@@ -31,7 +31,7 @@ class EnergyVad(
     preRollMs: Int = 300,
     private val minThreshold: Float = 0.008f,
     private val noiseFactor: Float = 3f,
-) {
+) : AudioSegmenter {
     private fun ms(v: Int) = (v / 1000.0 * sampleRate).toInt()
     private val silenceSamples = ms(silenceMs)
     private val maxSamples = ms(maxSegmentMs)
@@ -50,17 +50,17 @@ class EnergyVad(
     private var nextId = 1
     private var currentId = 0
 
-    var onSegment: ((AudioSegment) -> Unit)? = null
-    var onSpeechStart: ((Int) -> Unit)? = null
-    var onLevel: ((rms: Float, isSpeech: Boolean) -> Unit)? = null
+    override var onSegment: ((AudioSegment) -> Unit)? = null
+    override var onSpeechStart: ((Int) -> Unit)? = null
+    override var onLevel: ((rms: Float, isSpeech: Boolean) -> Unit)? = null
 
-    val isSpeaking: Boolean get() = inSpeech
-    val currentSegmentId: Int get() = if (inSpeech) currentId else 0
-    val currentDurationMs: Double get() = segmentLength * 1000.0 / sampleRate
+    override val isSpeaking: Boolean get() = inSpeech
+    override val currentSegmentId: Int get() = if (inSpeech) currentId else 0
+    override val currentDurationMs: Double get() = segmentLength * 1000.0 / sampleRate
 
-    fun peek(): FloatArray? = if (inSpeech && segmentLength > 0) concat(segment, segmentLength) else null
+    override fun peek(): FloatArray? = if (inSpeech && segmentLength > 0) concat(segment, segmentLength) else null
 
-    fun push(block: FloatArray) {
+    override fun push(block: FloatArray) {
         var sum = 0.0
         for (v in block) sum += v * v
         val rms = Math.sqrt(sum / maxOf(1, block.size)).toFloat()
@@ -101,7 +101,7 @@ class EnergyVad(
         else if (segmentLength >= maxSamples) splitAtQuietest()
     }
 
-    fun flush() { if (inSpeech) close(SegmentReason.FLUSH) }
+    override fun flush() { if (inSpeech) close(SegmentReason.FLUSH) }
 
     private fun splitAtQuietest() {
         val window = (1.2 * sampleRate).toInt()
