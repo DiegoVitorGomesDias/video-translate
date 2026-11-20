@@ -21,7 +21,7 @@ import { correctTranscript, extractTermsFromTitle, mergeTerms, parseGlossary, te
 import { modelLabelFor } from '@/lib/stt/models';
 import { collapseCharRuns } from '@/lib/stt/repetition';
 import { VAD_PROFILES, VAD_SENSITIVITIES } from '@/lib/audio/vad';
-import { MUSIC_WINDOW } from '@/lib/audio/music';
+import { MUSIC_WINDOWS } from '@/lib/audio/music';
 
 interface Card extends Sentence {
   pt?: string;
@@ -407,7 +407,7 @@ export function App() {
     const cfg =
       applied ??
       (options
-        ? { sttModel: options.audioMode === 'music' ? options.musicModel : options.sttModel, vadProfile: options.sentenceSplit, vadSensitivity: options.vadSensitivity, audioMode: options.audioMode }
+        ? { sttModel: options.audioMode === 'music' ? options.musicModel : options.sttModel, vadProfile: options.sentenceSplit, vadSensitivity: options.vadSensitivity, audioMode: options.audioMode, musicWindow: options.musicWindow }
         : null);
     if (!cfg) return null;
     const music = cfg.audioMode === 'music';
@@ -428,12 +428,13 @@ export function App() {
       !!options &&
       (wantedModel !== applied.sttModel ||
         options.audioMode !== (applied.audioMode ?? 'speech') ||
+        (music && options.musicWindow !== (applied.musicWindow ?? 'long')) ||
         (!music && (options.sentenceSplit !== applied.vadProfile || options.vadSensitivity !== (applied.vadSensitivity ?? 'normal'))) ||
         options.sttEngine !== (applied.sttEngine ?? 'local'));
     return {
       model: `${modelLabel}${backend ? ` · ${backend}` : ''}${fellBack ? fellBackLabel : ''}`,
       split: music
-        ? `Modo música: janelas de ~${MUSIC_WINDOW.windowMs / 1000} s (até ${MUSIC_WINDOW.maxWindowMs / 1000} s), sem detector de fala`
+        ? `Modo música: janela ${(MUSIC_WINDOWS[cfg.musicWindow ?? 'long'] ?? MUSIC_WINDOWS.long).label.toLowerCase()}, sem detector de fala`
         : `Separação: ${vp.label} (${vp.silenceMs / 1000} s / ${vp.maxSegmentMs / 1000} s)${vadLabel} · Sensibilidade: ${vs.label.toLowerCase()}`,
       changed,
       isApplied: !!applied,

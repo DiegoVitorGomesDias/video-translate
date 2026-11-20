@@ -2,7 +2,7 @@
 //
 // Num clipe musical o Silero VAD (treinado em fala) oscila com a voz cantada e o
 // instrumental e corta as frases em pedaços sem sentido, ou nem abre trecho. Aqui o áudio
-// é acumulado continuamente e cortado a cada `windowMs` (~3,5 s; o usuário achou 7 s longo demais), no bloco mais silencioso dos
+// é acumulado continuamente e cortado a cada `windowMs` (ver MUSIC_WINDOWS), no bloco mais silencioso dos
 // últimos `searchMs` (fim de verso, respiração), para que cada janela seja um verso ou
 // dois. Uma pausa longa (`silenceMs` abaixo de `minRms`) fecha a janela em aberto; uma
 // janela só de silêncio (vídeo pausado) é descartada.
@@ -22,7 +22,7 @@ export const AUDIO_MODES: Record<AudioMode, { label: string; description: string
   music: {
     label: 'Música (letras)',
     description:
-      'Sem detector de fala: o áudio é cortado em janelas de ~3,5 s, no ponto mais silencioso (fim de verso), e transcrito por um modelo Whisper, que entende voz cantada sobre instrumentos bem melhor que o Moonshine. Cada janela vira um verso. Latência maior e sem parciais.',
+      'Sem detector de fala: o áudio é cortado em janelas de 4 a 10 s (configurável), no ponto mais silencioso (fim de verso), e transcrito por um modelo Whisper, que entende voz cantada sobre instrumentos bem melhor que o Moonshine. Cada janela vira um verso. Latência maior e sem parciais.',
   },
 };
 
@@ -42,8 +42,28 @@ export interface MusicSegmenterOptions {
   minSoundMs?: number;
 }
 
-/** Parâmetros padrão do modo música (mostrados nas opções e no viewer). */
-export const MUSIC_WINDOW = { windowMs: 3500, maxWindowMs: 5000, searchMs: 1500, silenceMs: 800, minRms: 0.004, minSoundMs: 500 } as const;
+/**
+ * Tamanho da janela do modo música. O Whisper processa sempre 30 s por chamada, então o
+ * custo é por janela e não por segundo: janelas curtas chamam o modelo mais vezes (na CPU
+ * a fila acumula e a legenda atrasa), cortam versos no meio e tiram contexto do modelo;
+ * janelas longas acertam mais e saem inteiras, mas a legenda demora mais a aparecer.
+ */
+export type MusicWindowId = 'short' | 'medium' | 'long';
+export const MUSIC_WINDOWS: Record<MusicWindowId, { windowMs: number; maxWindowMs: number; searchMs: number; label: string; description: string }> = {
+  short: { windowMs: 4000, maxWindowMs: 5500, searchMs: 1500, label: 'Curta (~4 s)', description: 'Legenda aparece antes, mas versos cortados no meio, menos contexto e 2 a 3x mais chamadas do modelo: na CPU a fila acumula.' },
+  medium: { windowMs: 7000, maxWindowMs: 9000, searchMs: 2500, label: 'Média (~7 s)', description: 'Meio-termo: um ou dois versos por janela.' },
+  long: { windowMs: 10000, maxWindowMs: 12000, searchMs: 3000, label: 'Longa (~10 s)', description: 'Mais precisa: versos inteiros e contexto para o Whisper; menos chamadas (o modelo acompanha até na CPU). A legenda chega uns 10 a 15 s depois do início do verso.' },
+};
+export const DEFAULT_MUSIC_WINDOW: MusicWindowId = 'long';
+
+/** Parâmetros padrão do modo música (tamanho da janela 'long' + silêncio/som mínimo). */
+export const MUSIC_WINDOW = { ...MUSIC_WINDOWS[DEFAULT_MUSIC_WINDOW], silenceMs: 1000, minRms: 0.004, minSoundMs: 500 } as const;
+
+/** Opções do segmentador para um tamanho de janela. */
+export function musicWindowOptions(id: MusicWindowId | undefined): Pick<MusicSegmenterOptions, 'windowMs' | 'maxWindowMs' | 'searchMs'> {
+  const w = MUSIC_WINDOWS[id ?? DEFAULT_MUSIC_WINDOW] ?? MUSIC_WINDOWS[DEFAULT_MUSIC_WINDOW];
+  return { windowMs: w.windowMs, maxWindowMs: w.maxWindowMs, searchMs: w.searchMs };
+}
 
 export class MusicSegmenter implements SpeechSegmenter {
   onSegment: ((segment: AudioSegment) => void) | null = null;

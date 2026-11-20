@@ -33,7 +33,7 @@ export type WorkerInMessage =
   | TranscribeRequest
   /** Termos do glossário (nomes, siglas) para o prompt do Whisper. */
   | { type: 'set-terms'; terms: string[] }
-  /** Modo música: prompt sem as frases anteriores e com dica de canto; sem filtro de eco. */
+  /** Modo música: dica de canto no prompt até haver versos; filtro de eco só contra a janela anterior. */
   | { type: 'set-mode'; music: boolean }
   | { type: 'dispose' };
 
@@ -190,9 +190,9 @@ function setupPrompt(pipe: AutomaticSpeechRecognitionPipeline): void {
 function promptText(): string {
   const parts: string[] = [];
   if (terms.length > 0) parts.push(`${terms.slice(0, 30).join(', ')}.`);
-  // Música: um refrão repete de verdade; as frases anteriores no prompt fariam o Whisper
-  // ecoá-las (e o filtro de eco descartar o refrão). Só o glossário e a dica de canto.
-  if (musicMode) parts.push(MUSIC_PROMPT);
+  // Música: os versos anteriores são o melhor contexto (o Whisper conhece letras famosas
+  // e segue a rima/tema); enquanto não há nenhum, a dica de canto evita "♪" e legendas.
+  if (musicMode && recentFinals.length === 0) parts.push(MUSIC_PROMPT);
   else parts.push(...recentFinals);
   return parts.join(' ').replace(/\s+/g, ' ').trim();
 }
@@ -243,7 +243,10 @@ function stripPrompt(text: string, prompt: string): string {
 /** O Whisper às vezes "ecoa" o prompt em vez de transcrever (ruído, música): descarta repetições exatas. */
 function isEcho(text: string): boolean {
   const n = text.replace(/[\s.,!?]+/g, '').toLowerCase();
-  return n.length > 0 && recentFinals.some((f) => f.replace(/[\s.,!?]+/g, '').toLowerCase() === n);
+  // Música: um refrão volta de verdade; só a repetição exata da janela imediatamente
+  // anterior conta como eco (o Whisper devolvendo o prompt num trecho instrumental).
+  const pool = musicMode ? recentFinals.slice(-1) : recentFinals;
+  return n.length > 0 && pool.some((f) => f.replace(/[\s.,!?]+/g, '').toLowerCase() === n);
 }
 
 function rememberFinal(text: string): void {
@@ -302,7 +305,7 @@ async function decode(audio: Float32Array, opts: Record<string, unknown>, prompt
   let text = (Array.isArray(output) ? output.map((o) => o.text).join(' ') : output.text).trim();
   if (prompt) {
     text = stripPrompt(text, prompt.text);
-    if (!musicMode && isEcho(text)) text = '';
+    if (isEcho(text)) text = '';
   }
   const rep = checkRepetition(text);
   return { text: rep.text, looped: rep.looped };
@@ -335,7 +338,7 @@ async function transcribe(req: TranscribeRequest): Promise<void> {
     if (req.isFinal) {
       lastFinalInferenceMs = inferenceMs;
       // Um trecho alucinado não entra no prompt do próximo (realimentaria o laço).
-      if (!looped && !musicMode) rememberFinal(text);
+      if (!looped) rememberFinal(text);
     }
     post({ type: 'result', id: req.id, segmentId: req.segmentId, isFinal: req.isFinal, text, inferenceMs });
   } catch (err) {

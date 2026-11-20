@@ -304,6 +304,7 @@ async function startCapture(tab: chrome.tabs.Tab, options: Options, surface: Sta
       vadProfile: options.sentenceSplit,
       vadSensitivity: options.vadSensitivity,
       audioMode: options.audioMode,
+      musicWindow: options.musicWindow,
       context: { tabTitle: tab.title ?? '', useTabContext: options.useTabContext, glossary: options.glossary, ignoredTerms: options.ignoredTerms },
       server: { url: options.sttServerUrl.trim(), format: options.sttServerFormat, model: options.sttServerModel.trim(), apiKey: options.sttServerApiKey.trim() },
     });

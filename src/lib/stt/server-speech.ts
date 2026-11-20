@@ -195,14 +195,15 @@ export class ServerSpeechProvider implements SpeechProvider {
   private isEcho(text: string): boolean {
     const norm = (x: string) => x.replace(/[\s.,!?]+/g, '').toLowerCase();
     const n = norm(text);
-    return n.length > 0 && this.recent.some((f) => norm(f) === n);
+    const pool = this.music ? this.recent.slice(-1) : this.recent;
+    return n.length > 0 && pool.some((f) => norm(f) === n);
   }
 
   private prompt(): string {
     const parts: string[] = [];
     if (this.terms.length > 0) parts.push(`${this.terms.slice(0, 30).join(', ')}.`);
-    // Música: só glossário e dica de canto (ver local-stt.worker.ts).
-    if (this.music) parts.push('Lyrics:');
+    // Música: dica de canto até haver versos; depois os versos anteriores (ver local-stt.worker.ts).
+    if (this.music && this.recent.length === 0) parts.push('Lyrics:');
     else parts.push(...this.recent);
     return parts.join(' ').replace(/\s+/g, ' ').trim().slice(-600);
   }
@@ -215,7 +216,7 @@ export class ServerSpeechProvider implements SpeechProvider {
         const started = performance.now();
         try {
           let text = await requestTranscription(this.cfg, job.audio, job.sampleRate, this.prompt());
-          if (!this.music && this.isEcho(text)) text = '';
+          if (this.isEcho(text)) text = '';
           let rep = checkRepetition(text);
           if (rep.looped && this.prompt()) {
             // O contexto do prompt pode ter induzido o laço: tenta de novo sem ele.
@@ -228,7 +229,7 @@ export class ServerSpeechProvider implements SpeechProvider {
           if (job.isFinal) {
             this.lastFinalMs = inferenceMs;
             // Um trecho alucinado não entra no prompt do próximo (realimentaria o laço).
-            if (text && !rep.looped && !this.music) {
+            if (text && !rep.looped) {
               this.recent.push(text);
               while (this.recent.length > RECENT_LIMIT) this.recent.shift();
             }

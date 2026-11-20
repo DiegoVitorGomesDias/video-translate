@@ -1,6 +1,7 @@
 package com.videotranslate.app
 
 import android.content.Context
+import com.videotranslate.app.audio.MusicWindow
 import com.videotranslate.app.audio.VadProfile
 import com.videotranslate.app.audio.VadSensitivity
 import com.videotranslate.app.stt.SttModel
@@ -19,6 +20,7 @@ data class Settings(
     val audioMode: AudioMode = AudioMode.SPEECH,
     /** Modelo usado no modo música (só Whisper). */
     val musicModel: SttModel = SttModel.WHISPER_BASE_EN,
+    val musicWindow: MusicWindow = MusicWindow.LONG,
     val fontSp: Int = 18,
     val libreUrl: String = "",
     val libreApiKey: String = "",
@@ -41,6 +43,7 @@ data class Settings(
                 vadSensitivity = runCatching { VadSensitivity.valueOf(p.getString("vadSensitivity", "NORMAL")!!) }.getOrDefault(VadSensitivity.NORMAL),
                 audioMode = runCatching { AudioMode.valueOf(p.getString("audioMode", "SPEECH")!!) }.getOrDefault(AudioMode.SPEECH),
                 musicModel = SttModel.byIdOrNull(p.getString("musicModel", null))?.takeIf { it.forMusic } ?: SttModel.WHISPER_BASE_EN,
+                musicWindow = runCatching { MusicWindow.valueOf(p.getString("musicWindow", "LONG")!!) }.getOrDefault(MusicWindow.LONG),
                 fontSp = p.getInt("fontSp", 18),
                 libreUrl = p.getString("libreUrl", "") ?: "",
                 libreApiKey = p.getString("libreApiKey", "") ?: "",
@@ -58,6 +61,7 @@ data class Settings(
                 .putString("vadSensitivity", s.vadSensitivity.name)
                 .putString("audioMode", s.audioMode.name)
                 .putString("musicModel", s.musicModel.id)
+                .putString("musicWindow", s.musicWindow.name)
                 .putInt("fontSp", s.fontSp)
                 .putString("libreUrl", s.libreUrl)
                 .putString("libreApiKey", s.libreApiKey)
