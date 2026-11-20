@@ -5,6 +5,13 @@ enum class VadProfile(val silenceMs: Int, val maxSegmentMs: Int, val label: Stri
     FAST(200, 3000, "Rápida"), NORMAL(250, 4000, "Normal"), LONG(400, 6000, "Longa")
 }
 
+/** Sensibilidade do detector (igual à opção da extensão): limiar de energia, ganho automático e fala mínima. */
+enum class VadSensitivity(val minThreshold: Float, val noiseFactor: Float, val minSpeechMs: Int, val agcMaxGain: Float, val label: String, val description: String) {
+    LOW(0.008f, 3.5f, 300, 1.5f, "Baixa", "só fala clara, quase sem ganho; menos frases inventadas com música"),
+    NORMAL(0.005f, 2.5f, 220, 3f, "Normal", "equilíbrio para diálogo, ganho automático até 3x"),
+    HIGH(0.003f, 1.8f, 180, 6f, "Alta", "falas bem baixas e sussurros, ganho até 6x; pode gerar frases a mais com música"),
+}
+
 enum class SegmentReason { SILENCE, MAX_LENGTH, FLUSH }
 
 class AudioSegment(val id: Int, val audio: FloatArray, val sampleRate: Int, val endedAt: Long, val reason: SegmentReason) {

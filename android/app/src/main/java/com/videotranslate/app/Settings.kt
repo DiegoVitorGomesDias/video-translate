@@ -2,6 +2,7 @@ package com.videotranslate.app
 
 import android.content.Context
 import com.videotranslate.app.audio.VadProfile
+import com.videotranslate.app.audio.VadSensitivity
 import com.videotranslate.app.stt.SttModel
 
 
@@ -14,6 +15,7 @@ data class Settings(
     val audioSource: AudioSource = AudioSource.INTERNAL,
     val sttModel: SttModel = SttModel.MOONSHINE_TINY,
     val vadProfile: VadProfile = VadProfile.NORMAL,
+    val vadSensitivity: VadSensitivity = VadSensitivity.NORMAL,
     val audioMode: AudioMode = AudioMode.SPEECH,
     /** Modelo usado no modo música (só Whisper). */
     val musicModel: SttModel = SttModel.WHISPER_BASE_EN,
@@ -36,6 +38,7 @@ data class Settings(
                 audioSource = runCatching { AudioSource.valueOf(p.getString("audioSource", "INTERNAL")!!) }.getOrDefault(AudioSource.INTERNAL),
                 sttModel = SttModel.byId(p.getString("sttModel", null)),
                 vadProfile = runCatching { VadProfile.valueOf(p.getString("vadProfile", "NORMAL")!!) }.getOrDefault(VadProfile.NORMAL),
+                vadSensitivity = runCatching { VadSensitivity.valueOf(p.getString("vadSensitivity", "NORMAL")!!) }.getOrDefault(VadSensitivity.NORMAL),
                 audioMode = runCatching { AudioMode.valueOf(p.getString("audioMode", "SPEECH")!!) }.getOrDefault(AudioMode.SPEECH),
                 musicModel = SttModel.byIdOrNull(p.getString("musicModel", null))?.takeIf { it.forMusic } ?: SttModel.WHISPER_BASE_EN,
                 fontSp = p.getInt("fontSp", 18),
@@ -52,6 +55,7 @@ data class Settings(
                 .putString("audioSource", s.audioSource.name)
                 .putString("sttModel", s.sttModel.id)
                 .putString("vadProfile", s.vadProfile.name)
+                .putString("vadSensitivity", s.vadSensitivity.name)
                 .putString("audioMode", s.audioMode.name)
                 .putString("musicModel", s.musicModel.id)
                 .putInt("fontSp", s.fontSp)

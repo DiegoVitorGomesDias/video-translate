@@ -18,6 +18,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import com.videotranslate.app.audio.Agc
 import com.videotranslate.app.audio.AudioSegment
 import com.videotranslate.app.audio.AudioSegmenter
 import com.videotranslate.app.audio.EnergyVad
@@ -97,7 +98,7 @@ class CaptureService : Service() {
                 TranscriptRepository.reset()
                 val settings = Settings.load(this)
                 musicMode = settings.audioMode == AudioMode.MUSIC
-                val profileLabel = if (musicMode) MusicSegmenter.LABEL else "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s)"
+                val profileLabel = if (musicMode) MusicSegmenter.LABEL else "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s) · sensibilidade ${settings.vadSensitivity.label.lowercase()}"
                 TranscriptRepository.update { it.copy(capture = CaptureState.STARTING, statusText = "Iniciando…", appliedModel = settings.activeModel.label.substringBefore(" ("), appliedProfile = profileLabel) }
                 if (settings.overlayEnabled && android.provider.Settings.canDrawOverlays(this)) {
                     overlay = OverlayManager(this, settings).also { it.show() }
@@ -133,12 +134,16 @@ class CaptureService : Service() {
             record = rec
 
             // 2. Segmentador + fila de trechos; a leitura começa já (o modelo carrega em paralelo).
-            //    Fala: detector por energia. Música: janelas fixas de ~7 s, sem detector (o
-            //    canto sobre instrumentos não tem as pausas que o detector procura).
-            val vad: AudioSegmenter = if (musicMode) MusicSegmenter(SAMPLE_RATE) else EnergyVad(SAMPLE_RATE, settings.vadProfile.silenceMs, settings.vadProfile.maxSegmentMs)
+            //    Fala: detector por energia (com sensibilidade e AGC). Música: janelas fixas de
+            //    ~7 s, sem detector nem AGC (o canto sobre instrumentos não tem as pausas que o
+            //    detector procura, e o instrumental não deve ser amplificado).
+            val sens = settings.vadSensitivity
+            val vad: AudioSegmenter = if (musicMode) MusicSegmenter(SAMPLE_RATE)
+            else EnergyVad(SAMPLE_RATE, settings.vadProfile.silenceMs, settings.vadProfile.maxSegmentMs, minSpeechMs = sens.minSpeechMs, minThreshold = sens.minThreshold, noiseFactor = sens.noiseFactor)
+            val agc = if (!musicMode && sens.agcMaxGain > 1f) Agc(target = 0.5f, maxGain = sens.agcMaxGain, sampleRate = SAMPLE_RATE) else null
             vad.onSegment = { seg -> closedSegments += seg.id; finals.trySend(seg) }
             vad.onLevel = { rms, _ -> TranscriptRepository.update { it.copy(level = minOf(1f, rms * 8)) } }
-            startReading(rec, vad)
+            startReading(rec, vad, agc)
 
             // 3. Tradutor (ML Kit por padrão; LibreTranslate se configurado e saudável).
             scope.launch { translator = pickTranslator(settings) }
@@ -159,7 +164,7 @@ class CaptureService : Service() {
             }
             val modeLabel = if (musicMode) " · modo música" else ""
             TranscriptRepository.update { it.copy(capture = CaptureState.LISTENING, statusText = "Ouvindo · ${model.label.substringBefore(" (")}$modeLabel", progress = null) }
-            overlay?.setStatus("Ouvindo · ${model.label.substringBefore(" (")} · ${if (musicMode) "Música" else settings.vadProfile.label}")
+            overlay?.setStatus("Ouvindo · ${model.label.substringBefore(" (")} · ${if (musicMode) "Música" else "${settings.vadProfile.label} · ${settings.vadSensitivity.label}"}")
 
             // 5. Parciais a cada 1,5 s enquanto há trecho aberto (não no modo música: o Whisper
             //    custa o mesmo para um parcial e para o final, e a janela já é longa).
@@ -189,7 +194,7 @@ class CaptureService : Service() {
 
     private fun handleFinal(seg: AudioSegment) {
         val rec = recognizer ?: return
-        var text = rec.transcribe(normalizePeak(seg.audio), seg.sampleRate)
+        var text = rec.transcribe(Agc.normalizePeak(seg.audio), seg.sampleRate)
         if (musicMode) text = LyricsFilter.clean(text)
         val reason = when (seg.reason) { SegmentReason.SILENCE -> EndReason.SILENCE; SegmentReason.MAX_LENGTH -> EndReason.MAX_LENGTH; SegmentReason.FLUSH -> EndReason.FLUSH }
         val sentences = segmenter.push(text, System.currentTimeMillis(), reason)
@@ -204,7 +209,7 @@ class CaptureService : Service() {
 
     private fun handlePartial(segmentId: Int, audio: FloatArray) {
         val rec = recognizer ?: return
-        val text = rec.transcribe(audio)
+        val text = rec.transcribe(Agc.normalizePeak(audio))
         if (segmentId in closedSegments) return
         val pending = segmenter.pending
         TranscriptRepository.update { it.copy(partial = listOf(pending, text).filter { p -> p.isNotBlank() }.joinToString(" ")) }
@@ -274,17 +279,7 @@ class CaptureService : Service() {
         return rec
     }
 
-    /** Normaliza o pico do trecho (ganho entre 1 e 8x) quando o áudio está baixo, antes do STT. */
-    private fun normalizePeak(audio: FloatArray, target: Float = 0.9f, maxGain: Float = 8f): FloatArray {
-        var peak = 0f
-        for (v in audio) { val a = Math.abs(v); if (a > peak) peak = a }
-        if (peak <= 0f || peak >= target) return audio
-        val gain = minOf(maxGain, target / peak)
-        if (gain <= 1.001f) return audio
-        return FloatArray(audio.size) { audio[it] * gain }
-    }
-
-    private fun startReading(rec: AudioRecord, vad: AudioSegmenter) {
+    private fun startReading(rec: AudioRecord, vad: AudioSegmenter, agc: Agc?) {
         reading = true
         rec.startRecording()
         readThread = Thread({
@@ -293,7 +288,7 @@ class CaptureService : Service() {
                 val n = rec.read(buf, 0, buf.size)
                 if (n <= 0) { if (n < 0) { Log.w(TAG, "read=$n"); break }; continue }
                 val f = FloatArray(n) { buf[it] / 32768f }
-                vad.push(f)
+                vad.push(agc?.process(f) ?: f)
             }
         }, "audio-read").also { it.start() }
     }

@@ -65,6 +65,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.videotranslate.app.audio.MusicSegmenter
 import com.videotranslate.app.audio.VadProfile
+import com.videotranslate.app.audio.VadSensitivity
 import com.videotranslate.app.stt.SttModel
 
 class MainActivity : ComponentActivity() {
@@ -139,7 +140,7 @@ fun MainScreen() {
         run {
             val music = settings.audioMode == AudioMode.MUSIC
             val model = state.appliedModel.ifEmpty { settings.activeModel.label.substringBefore(" (") }
-            val wantedProfile = if (music) MusicSegmenter.LABEL else "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s)"
+            val wantedProfile = if (music) MusicSegmenter.LABEL else "${settings.vadProfile.label} (${settings.vadProfile.silenceMs / 1000.0} s / ${settings.vadProfile.maxSegmentMs / 1000} s) · sensibilidade ${settings.vadSensitivity.label.lowercase()}"
             val profile = state.appliedProfile.ifEmpty { wantedProfile }
             val changed = running && state.appliedModel.isNotEmpty() && (settings.activeModel.label.substringBefore(" (") != state.appliedModel || state.appliedProfile != wantedProfile)
             Text(
@@ -223,6 +224,9 @@ fun SettingsDialog(initial: Settings, onDismiss: () -> Unit, onSave: (Settings) 
 
                     Text("Separação de frases", style = MaterialTheme.typography.labelLarge)
                     VadProfile.entries.forEach { p -> RadioRow("${p.label}: pausa ${p.silenceMs} ms, até ${p.maxSegmentMs / 1000} s", s.vadProfile == p) { s = s.copy(vadProfile = p) } }
+
+                    Text("Sensibilidade do detector de fala", style = MaterialTheme.typography.labelLarge)
+                    VadSensitivity.entries.forEach { v -> RadioRow("${v.label}: ${v.description}", s.vadSensitivity == v) { s = s.copy(vadSensitivity = v) } }
                 }
 
                 Text("Tamanho da fonte: ${s.fontSp}", style = MaterialTheme.typography.labelLarge)

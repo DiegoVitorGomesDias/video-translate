@@ -11,8 +11,8 @@ export const SILERO_MODEL_ID = 'onnx-community/silero-vad';
 /** Tamanho da janela que o modelo espera a 16 kHz. */
 const FRAME = 512;
 /** Limiares (ver VAD_SENSITIVITIES em vad.ts); vêm nas opções do init. */
-let startThreshold = 0.45;
-let endThreshold = 0.3;
+let startThreshold = 0.4;
+let endThreshold = 0.25;
 
 export type SileroInMessage =
   | { type: 'init'; options: VadOptions; ortWasmPaths: { mjs: string; wasm: string } }
