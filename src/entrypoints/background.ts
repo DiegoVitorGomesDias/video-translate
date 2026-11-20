@@ -262,6 +262,23 @@ async function updateTabTitle(title: string, url: string): Promise<void> {
   }
 }
 
+/**
+ * Botão "limpar" do viewer: relê o título da aba capturada. Com activeTab a aba traz o
+ * título; sem acesso (navegação depois do clique no ícone) tabs.get devolve sem título e
+ * o que o drawer mandou por último fica valendo.
+ */
+async function refreshTabTitle(): Promise<void> {
+  const state = await getState();
+  if (state.tabId === null) return;
+  let tab: chrome.tabs.Tab | undefined;
+  try {
+    tab = await browser.tabs.get(state.tabId);
+  } catch {
+    return;
+  }
+  if (tab?.title) await updateTabTitle(tab.title, tab.url ?? '');
+}
+
 /** Onde mostrar o viewer ao começar: abrir conforme as opções, ou usar o viewer que pediu (já aberto). */
 type StartSurface = { kind: 'open'; sidePanelOpened: boolean } | { kind: 'existing'; mode: DisplayMode; windowId?: number };
 
@@ -465,6 +482,12 @@ export default defineBackground(() => {
         case 'tab-title':
           void updateTabTitle(msg.title, msg.url);
           break;
+        case 'refresh-tab-title':
+          refreshTabTitle().then(
+            () => sendResponse({ ok: true }),
+            (err) => sendResponse({ ok: false, error: String(err) }),
+          );
+          return true; // resposta assíncrona
       }
       return;
     }

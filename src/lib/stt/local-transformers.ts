@@ -134,6 +134,10 @@ export class LocalTransformersProvider implements SpeechProvider {
     this.post({ type: 'set-mode', music: on });
   }
 
+  resetContext(): void {
+    this.post({ type: 'reset-context' });
+  }
+
   transcribe(segment: AudioSegment): void {
     this.send(segment.id, true, segment.audio, segment.sampleRate, segment.endedAt, segment.reason);
   }

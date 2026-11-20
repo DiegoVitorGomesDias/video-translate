@@ -96,6 +96,15 @@ export class SentenceSegmenter {
     return [];
   }
 
+  /**
+   * Descarta o resto pendente sem fechar frase (botão "limpar"). Os ids continuam de onde
+   * estavam: uma tradução ainda em curso de uma frase apagada não pode cair numa frase nova.
+   */
+  reset(): void {
+    this.rest = '';
+    this.restSince = 0;
+  }
+
   /** Fecha o resto incondicionalmente (ex.: ao parar a captura). */
   flush(now: number = Date.now()): Sentence[] {
     if (!this.rest) return [];

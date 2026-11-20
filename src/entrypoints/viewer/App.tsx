@@ -274,6 +274,20 @@ export function App() {
       }
     })();
   };
+  /**
+   * Botão "limpar": começou outro vídeo na mesma aba. Apaga as legendas e o resto do
+   * segmentador, manda o offscreen esquecer o histórico e as frases anteriores (prompt do
+   * Whisper, versos do modo música) e pede ao background para reler o título da aba, de onde
+   * saem os nomes do contexto (tradução e correção da transcrição).
+   */
+  const clear = () => {
+    segmenter.current.reset();
+    setCards([]);
+    setPartial('');
+    setStuckToEnd(true);
+    void browser.runtime.sendMessage({ target: OFFSCREEN_TARGET, type: 'clear-transcripts' }).catch(() => undefined);
+    void browser.runtime.sendMessage({ target: BACKGROUND_TARGET, type: 'refresh-tab-title' }).catch(() => undefined);
+  };
   const openOptions = () => void browser.runtime.openOptionsPage();
   /** A−/A+ no cabeçalho: mesma opção fontSize das configurações (12–32 px), salva para as próximas vezes. */
   const changeFontSize = (delta: number) => {
@@ -473,6 +487,14 @@ export function App() {
           </span>
           <button className="link" onClick={openOptions} title={translatorDetail || translatorLabel}>
             {translatorLabel}
+          </button>
+          <button
+            className="link"
+            onClick={clear}
+            disabled={cards.length === 0 && !partial && !segmenter.current.pending}
+            title="Apagar as legendas e recomeçar o contexto: frases anteriores esquecidas e nomes relidos do título da aba (para quando começa outro vídeo)"
+          >
+            limpar
           </button>
           <button className="link" onClick={switchDisplay} disabled={captureStatus === 'stopped'} title={DISPLAY_MODE !== 'window' ? 'Abrir numa janela separada' : 'Voltar para o painel ao lado do vídeo'}>
             {DISPLAY_MODE !== 'window' ? 'abrir em janela' : 'voltar para o painel'}

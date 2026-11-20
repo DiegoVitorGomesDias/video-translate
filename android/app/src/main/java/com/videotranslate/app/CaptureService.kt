@@ -57,6 +57,7 @@ class CaptureService : Service() {
     companion object {
         const val ACTION_START = "com.videotranslate.app.START"
         const val ACTION_STOP = "com.videotranslate.app.STOP"
+        const val ACTION_CLEAR = "com.videotranslate.app.CLEAR"
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_RESULT_DATA = "resultData"
         const val EXTRA_USE_MIC = "useMic"
@@ -75,6 +76,16 @@ class CaptureService : Service() {
 
         fun stop(context: Context) {
             context.startService(Intent(context, CaptureService::class.java).setAction(ACTION_STOP))
+        }
+
+        /**
+         * Botão "limpar" (tela e painel flutuante): começou outro vídeo. Apaga as frases, a parcial,
+         * o resto do segmentador e o painel; a captura continua. Sem serviço rodando só limpa a tela
+         * (startService criaria um serviço sem primeiro plano à toa).
+         */
+        fun clear(context: Context) {
+            if (running) context.startService(Intent(context, CaptureService::class.java).setAction(ACTION_CLEAR))
+            else TranscriptRepository.clearTranscript()
         }
     }
 
@@ -103,6 +114,7 @@ class CaptureService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> { stopSelf(); return START_NOT_STICKY }
+            ACTION_CLEAR -> { if (running) clearTranscript() else stopSelf(); return START_NOT_STICKY }
             ACTION_START -> {
                 if (running) return START_STICKY
                 val useMic = intent.getBooleanExtra(EXTRA_USE_MIC, false)
@@ -221,6 +233,14 @@ class CaptureService : Service() {
         } catch (e: Throwable) {
             reportError("Falha na captura", e)
         }
+    }
+
+    /** Limpa o que está na tela e no painel; o reconhecedor do app não guarda contexto entre trechos (sem prompt). */
+    private fun clearTranscript() {
+        segmenter.reset()
+        TranscriptRepository.clearTranscript()
+        overlay?.clear()
+        Log.i(TAG, "legendas limpas pelo usuário")
     }
 
     private fun reportError(title: String, e: Throwable) {
