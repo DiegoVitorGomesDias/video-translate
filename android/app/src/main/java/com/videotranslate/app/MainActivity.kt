@@ -232,13 +232,13 @@ fun SettingsDialog(initial: Settings, onDismiss: () -> Unit, onSave: (Settings) 
 
                 Text("Modo de áudio (vale na próxima captura)", style = MaterialTheme.typography.labelLarge)
                 RadioRow("Fala: filmes, séries, vídeos falados (detector de fala + Moonshine)", s.audioMode == AudioMode.SPEECH) { s = s.copy(audioMode = AudioMode.SPEECH) }
-                RadioRow("Música: letras cantadas em inglês (janelas de ~7 s + Whisper)", s.audioMode == AudioMode.MUSIC) { s = s.copy(audioMode = AudioMode.MUSIC) }
+                RadioRow("Música: letras cantadas em inglês (janelas de ~3,5 s + Whisper)", s.audioMode == AudioMode.MUSIC) { s = s.copy(audioMode = AudioMode.MUSIC) }
 
                 if (s.audioMode == AudioMode.MUSIC) {
                     Text("Modelo do modo música", style = MaterialTheme.typography.labelLarge)
                     SttModel.entries.filter { it.forMusic }.forEach { m -> RadioRow("${m.label} · download ~${m.sizeMb} MB", s.musicModel == m) { s = s.copy(musicModel = m) } }
                     Text(
-                        "O Whisper entende voz cantada sobre instrumentos; o Moonshine não. Sem detector de fala: cada janela de ~7 s vira um verso, cortada no ponto mais silencioso. Sem texto parcial; a legenda chega alguns segundos depois do verso. Trechos só instrumentais são descartados.",
+                        "O Whisper entende voz cantada sobre instrumentos; o Moonshine não. Sem detector de fala: cada janela de ~3,5 s vira um verso, cortada no ponto mais silencioso. Sem texto parcial; a legenda chega alguns segundos depois do verso. Trechos só instrumentais são descartados.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 } else {

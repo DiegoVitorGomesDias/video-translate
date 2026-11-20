@@ -2,7 +2,7 @@
 //
 // Num clipe musical o Silero VAD (treinado em fala) oscila com a voz cantada e o
 // instrumental e corta as frases em pedaços sem sentido, ou nem abre trecho. Aqui o áudio
-// é acumulado continuamente e cortado a cada `windowMs`, no bloco mais silencioso dos
+// é acumulado continuamente e cortado a cada `windowMs` (~3,5 s; o usuário achou 7 s longo demais), no bloco mais silencioso dos
 // últimos `searchMs` (fim de verso, respiração), para que cada janela seja um verso ou
 // dois. Uma pausa longa (`silenceMs` abaixo de `minRms`) fecha a janela em aberto; uma
 // janela só de silêncio (vídeo pausado) é descartada.
@@ -22,7 +22,7 @@ export const AUDIO_MODES: Record<AudioMode, { label: string; description: string
   music: {
     label: 'Música (letras)',
     description:
-      'Sem detector de fala: o áudio é cortado em janelas de ~7 s, no ponto mais silencioso (fim de verso), e transcrito por um modelo Whisper, que entende voz cantada sobre instrumentos bem melhor que o Moonshine. Cada janela vira um verso. Latência maior e sem parciais.',
+      'Sem detector de fala: o áudio é cortado em janelas de ~3,5 s, no ponto mais silencioso (fim de verso), e transcrito por um modelo Whisper, que entende voz cantada sobre instrumentos bem melhor que o Moonshine. Cada janela vira um verso. Latência maior e sem parciais.',
   },
 };
 
@@ -43,7 +43,7 @@ export interface MusicSegmenterOptions {
 }
 
 /** Parâmetros padrão do modo música (mostrados nas opções e no viewer). */
-export const MUSIC_WINDOW = { windowMs: 7000, maxWindowMs: 9000, searchMs: 2500, silenceMs: 1200, minRms: 0.004, minSoundMs: 800 } as const;
+export const MUSIC_WINDOW = { windowMs: 3500, maxWindowMs: 5000, searchMs: 1500, silenceMs: 800, minRms: 0.004, minSoundMs: 500 } as const;
 
 export class MusicSegmenter implements SpeechSegmenter {
   onSegment: ((segment: AudioSegment) => void) | null = null;
